@@ -70,7 +70,6 @@ class PinManager {
     }
 
     canGenerateNewPins() {
-        // Chỉ được tạo mã PIN mới nếu đã dùng hết 8 cái
         return this.usedPins.length === this.pins.length && this.pins.length > 0;
     }
 
@@ -114,6 +113,146 @@ class PinManager {
 }
 
 const pinManager = new PinManager();
+
+// ============== CHAT HISTORY MANAGER ==============
+class ChatHistoryManager {
+    constructor() {
+        this.maxHistories = 80;
+        this.histories = [];
+        this.currentSessionId = null;
+    }
+
+    generateSessionId() {
+        return 'session_' + Date.now() + '_' + Math.random().toString(36).substr(2, 9);
+    }
+
+    startNewSession() {
+        this.currentSessionId = this.generateSessionId();
+        return this.currentSessionId;
+    }
+
+    getCurrentSessionId() {
+        if (!this.currentSessionId) {
+            this.startNewSession();
+        }
+        return this.currentSessionId;
+    }
+
+    addMessage(message, isUser = true) {
+        const sessionId = this.getCurrentSessionId();
+        const messageData = {
+            text: message,
+            isUser: isUser,
+            timestamp: new Date().getTime()
+        };
+
+        const sessionIndex = this.histories.findIndex(function(h) { return h.id === sessionId; });
+        let session;
+
+        if (sessionIndex === -1) {
+            session = {
+                id: sessionId,
+                title: this.generateTitle(message),
+                messages: [],
+                createdAt: new Date().getTime(),
+                updatedAt: new Date().getTime()
+            };
+            this.histories.unshift(session);
+            
+            if (this.histories.length > this.maxHistories) {
+                this.histories = this.histories.slice(0, this.maxHistories);
+            }
+        } else {
+            session = this.histories[sessionIndex];
+            if (sessionIndex > 0) {
+                this.histories.splice(sessionIndex, 1);
+                this.histories.unshift(session);
+            }
+        }
+
+        session.messages.push(messageData);
+        session.updatedAt = new Date().getTime();
+
+        this.saveHistories();
+        return session;
+    }
+
+    generateTitle(message) {
+        const maxLength = 50;
+        if (message.length > maxLength) {
+            return message.substring(0, maxLength) + '...';
+        }
+        return message;
+    }
+
+    getSessionById(sessionId) {
+        return this.histories.find(function(h) { return h.id === sessionId; });
+    }
+
+    loadSession(sessionId) {
+        const session = this.getSessionById(sessionId);
+        if (session) {
+            this.currentSessionId = sessionId;
+            return session;
+        }
+        return null;
+    }
+
+    deleteSession(sessionId) {
+        const index = this.histories.findIndex(function(h) { return h.id === sessionId; });
+        if (index !== -1) {
+            this.histories.splice(index, 1);
+            this.saveHistories();
+
+            if (this.currentSessionId === sessionId) {
+                if (this.histories.length > 0) {
+                    this.currentSessionId = this.histories[0].id;
+                } else {
+                    this.currentSessionId = null;
+                }
+            }
+            return true;
+        }
+        return false;
+    }
+
+    saveHistories() {
+        if (appState.currentUser) {
+            const key = 'chatHistories_' + appState.currentUser.email;
+            localStorage.setItem(key, JSON.stringify(this.histories));
+        }
+    }
+
+    loadHistories(email) {
+        if (!email) {
+            this.histories = [];
+            this.currentSessionId = null;
+            return;
+        }
+
+        const key = 'chatHistories_' + email;
+        const saved = localStorage.getItem(key);
+        if (saved) {
+            try {
+                this.histories = JSON.parse(saved);
+            } catch (e) {
+                this.histories = [];
+            }
+        } else {
+            this.histories = [];
+        }
+
+        this.currentSessionId = this.histories.length > 0 ? this.histories[0].id : null;
+    }
+
+    getAllHistories() {
+        return this.histories.slice().sort(function(a, b) {
+            return (b.updatedAt || b.createdAt || 0) - (a.updatedAt || a.createdAt || 0);
+        });
+    }
+}
+
+const chatHistoryManager = new ChatHistoryManager();
 
 // ============== STATE MANAGEMENT ==============
 class AppState {
@@ -244,18 +383,42 @@ class SettingsManager {
 
 const settingsManager = new SettingsManager();
 
-// ============== AI ENGINE ==============
+// ============== AI ENGINE - ENHANCED (V2) ==============
 class AIEngine {
     constructor() {
         this.conversationContext = [];
+        this.conversationHistory = [];
+        this.rightCareUrl = 'https://chatgpt.com/g/g-67657a1bfffc819190a59d65f229376d-rightcare-tu-van-suc-khoe';
     }
 
     generateResponse(message) {
         this.conversationContext.push(message);
+        this.conversationHistory.push({
+            timestamp: new Date(),
+            message: message,
+            type: 'user'
+        });
+
         const lowerMessage = message.toLowerCase().trim();
-        
+
+        if (this.isHealthWebsiteRequest(lowerMessage)) {
+            return this.handleHealthWebsiteRequest();
+        }
+
+        if (this.isOffTopic(lowerMessage)) {
+            return this.getOffTopicResponse();
+        }
+
         if (this.isGreeting(lowerMessage)) {
-            return this.getGreeting();
+            return this.getRandomGreeting();
+        }
+
+        if (this.isThanks(lowerMessage)) {
+            return this.getRandomThanksResponse();
+        }
+
+        if (this.isApology(lowerMessage)) {
+            return this.getRandomApologyResponse();
         }
 
         if (this.isHealthRelated(lowerMessage)) {
@@ -274,162 +437,441 @@ class AIEngine {
             return this.handleTimeQuestion(lowerMessage, message);
         }
 
-        if (this.isThanks(lowerMessage)) {
-            return '😊 Không có chi! Tôi luôn sẵn lòng giúp bạn. Bạn có câu hỏi nào khác không?';
+        if (this.isMentalHealthRelated(lowerMessage)) {
+            return this.handleMentalHealthQuestion(lowerMessage, message);
         }
 
-        if (this.isApology(lowerMessage)) {
-            return '😄 Không sao! Không cần xin lỗi. Hãy cứ thoải mái hỏi tôi bất cứ điều gì!';
+        if (this.isEmotionalRelated(lowerMessage)) {
+            return this.handleEmotionalQuestion(lowerMessage, message);
+        }
+
+        if (this.isSleepRelated(lowerMessage)) {
+            return this.handleSleepQuestion(lowerMessage, message);
+        }
+
+        if (this.isWeightRelated(lowerMessage)) {
+            return this.handleWeightQuestion(lowerMessage, message);
         }
 
         return this.handleGeneralQuestion(lowerMessage, message);
     }
 
+    isOffTopic(msg) {
+        const offTopicKeywords = [
+            'tên bạn', 'bạn tên gì', 'bạn là ai', 'mày là ai', 'ai vậy',
+            'bạn từ đâu', 'bạn ở đâu', 'bạn bao nhiêu tuổi', 'bạn có bạn gái',
+            'hãy làm', 'làm hộ tôi', 'giúp tôi làm', 'viết code', 'code cho tôi',
+            'bạn yêu ai', 'bạn thích gì', 'bạn sao', 'bạn đang làm gì',
+            'meme', 'đùa', 'cười', 'haha', 'hihi', 'hehe', 'hihihi',
+            'troll', 'chế giễu', 'nhạo báng', 'chửi', 'xúc phạm',
+            'không biết', 'ko biết', 'chẳng biết', 'ko hiểu', 'không hiểu',
+            'gì vậy', 'sao vậy', 'kiểu gì', 'làm sao', 'thế nào',
+            'cây ngoài lề', 'ngoài đề', 'không liên quan', 'vô liên quan',
+            'politics', 'chính trị', 'dân tộc', 'tôn giáo', 'xâm nhập',
+            'hack', 'virus', 'crack', 'pirate'
+        ];
+
+        return offTopicKeywords.some(function(keyword) {
+            return msg.includes(keyword);
+        });
+    }
+
+    getOffTopicResponse() {
+        const responses = [
+            '🤔 Câu hỏi hay! Nhưng đó không phải về sức khỏe.\n\n✅ Tôi chuyên giúp bạn về:\n• Sức khỏe\n• Dinh dưỡng\n• Tập luyện\n• Giấc ngủ\n• Stress',
+            '😄 Bạn đang hỏi ngoài lề rồi!\n\n💚 Hãy hỏi tôi về:\n1. Bệnh, đau\n2. Ăn uống\n3. Tập gym\n4. Giấc ngủ\n5. Quản lý stress',
+            '👀 Oops! Câu hỏi này không liên quan đến sức khỏe.\n\n🎯 Tôi là AI chuyên về:\n• Đánh giá sức khỏe\n• Lịch tập\n• Dinh dưỡng\n• Thói quen lành mạnh',
+            '😊 Không thể giúp bạn với câu hỏi này!\n\n💪 Hãy hỏi về:\n• Làm sao để khỏe?\n• Nên ăn gì?\n• Tập như thế nào?\n• Mất ngủ phải sao?',
+            '🚫 Câu hỏi này ngoài khả năng của tôi!\n\n✨ Tôi chỉ giúp được:\n👉 Sức khỏe toàn diện\n👉 Luyện tập\n👉 Dinh dưỡng\n👉 Quản lý tâm lý'
+        ];
+        return responses[Math.floor(Math.random() * responses.length)] + this.getRightCareSuggestion();
+    }
+
+    isHealthWebsiteRequest(msg) {
+        const siteWords = ['web', 'wed', 'website', 'site', 'trang'];
+        const intentWords = ['có', 'gợi ý', 'tham khảo', 'đề xuất', 'cho mình', 'giới thiệu', 'không', 'tu van', 'tư vấn'];
+        const healthWords = ['sức khỏe', 'khoe', 'khỏe', 'bệnh', 'triệu chứng', 'khám'];
+
+        const hasSiteWord = siteWords.some(function(w) { return msg.includes(w); });
+        const hasHealthWord = healthWords.some(function(w) { return msg.includes(w); });
+        const hasIntent = intentWords.some(function(w) { return msg.includes(w); });
+
+        return (hasSiteWord && hasHealthWord) || (hasSiteWord && hasIntent);
+    }
+
+    handleHealthWebsiteRequest() {
+        const responses = [
+            '✅ Có nhé. Đây là web tư vấn sức khỏe bạn có thể tham khảo:',
+            '🌐 Bạn có thể dùng kênh này để kiểm tra và tư vấn sức khỏe:',
+            '🩺 Có, mình gợi ý trang này để bạn hỏi triệu chứng nhanh:',
+            '📌 Nếu cần tư vấn thêm, bạn mở link này để kiểm tra sức khỏe:',
+            '💚 Đây là một lựa chọn phù hợp để bạn tham khảo sức khỏe:'
+        ];
+        const intro = this.getRandomResponse(responses);
+        return intro + '\n<a href="' + this.rightCareUrl + '" target="_blank" rel="noopener noreferrer">RightCare - Tư vấn sức khỏe</a>';
+    }
+
     isGreeting(msg) {
-        const greetings = ['xin chào', 'chào', 'hello', 'hi', 'hey'];
+        const greetings = ['xin chào', 'chào', 'hello', 'hi', 'hey', 'halo', 'hôm nay thế nào', 'bạn khỏe không', 'khoẻ không'];
         return greetings.some(function(g) { return msg.includes(g); });
     }
 
     isThanks(msg) {
-        const thanks = ['cảm ơn', 'thanks', 'thank you', 'tks'];
+        const thanks = ['cảm ơn', 'thanks', 'thank you', 'tks', 'cảm ơn nhiều', 'cảm ơn bạn'];
         return thanks.some(function(t) { return msg.includes(t); });
     }
 
     isApology(msg) {
-        const apologies = ['xin lỗi', 'lỗi', 'sorry'];
+        const apologies = ['xin lỗi', 'lỗi', 'sorry', 'miễn lỗi', 'mình xin lỗi'];
         return apologies.some(function(a) { return msg.includes(a); });
     }
 
     isHealthRelated(msg) {
-        const healthKeywords = ['sức khỏe', 'khỏe', 'bệnh', 'bị', 'đau', 'mệt', 'cảm', 'lạnh', 'sốt', 'stress', 'giảm cân', 'tăng cơ', 'mất ngủ'];
+        const healthKeywords = [
+            'sức khỏe', 'khỏe', 'bệnh', 'bị', 'đau', 'chảy máu',
+            'cảm', 'lạnh', 'sốt', 'viêm', 'tay chân', 'mỏi',
+            'miễn dịch', 'chống chỉ định', 'bác sĩ', 'thuốc',
+            'triệu chứng', 'bệnh tật', 'khám sức khỏe'
+        ];
         return healthKeywords.some(function(k) { return msg.includes(k); });
     }
 
+    isMentalHealthRelated(msg) {
+        const mentalKeywords = [
+            'stress', 'căng thẳng', 'lo lắng', 'trầm cảm',
+            'tâm lý', 'tinh thần', 'chán nản', 'tuyệt vọng',
+            'buồn', 'buồn bã', 'uất ức', 'bực bội'
+        ];
+        return mentalKeywords.some(function(k) { return msg.includes(k); });
+    }
+
+    isEmotionalRelated(msg) {
+        const emotionalKeywords = [
+            'cảm xúc', 'tâm trạng', 'giận', 'vui', 'buồn',
+            'lo', 'sợ', 'đau lòng', 'khó chịu', 'bất mãn'
+        ];
+        return emotionalKeywords.some(function(k) { return msg.includes(k); });
+    }
+
+    isSleepRelated(msg) {
+        const sleepKeywords = [
+            'ngủ', 'mất ngủ', 'giấc ngủ', 'ngủ không', 'buồn ngủ',
+            'mệt', 'không ngủ', 'dậy sớm', 'nằm không ngủ'
+        ];
+        return sleepKeywords.some(function(k) { return msg.includes(k); });
+    }
+
+    isWeightRelated(msg) {
+        const weightKeywords = [
+            'giảm cân', 'tăng cân', 'béo', 'gầy', 'cân nặng',
+            'weight', 'eo', 'vòng', 'bụng', 'cơ bắp', 'tăng cơ'
+        ];
+        return weightKeywords.some(function(k) { return msg.includes(k); });
+    }
+
     isMealRelated(msg) {
-        const mealKeywords = ['ăn', 'bữa', 'cơm', 'thịt', 'rau', 'trái cây', 'dinh dưỡng', 'protein', 'đường', 'mặn', 'ngọt', 'nước', 'cafe', 'cà phê'];
+        const mealKeywords = [
+            'ăn', 'bữa', 'cơm', 'thịt', 'rau', 'trái cây', 'dinh dưỡng', 'protein',
+            'carbs', 'đường', 'mặn', 'ngọt', 'nước', 'cafe', 'cà phê', 'uống',
+            'bữa ăn', 'buổi', 'snack', 'đồ ăn', 'thực phẩm', 'chế độ ăn'
+        ];
         return mealKeywords.some(function(k) { return msg.includes(k); });
     }
 
     isActivityRelated(msg) {
-        const activityKeywords = ['tập', 'chạy', 'yoga', 'gym', 'bơi', 'đạp xe', 'thể dục', 'luyện', 'exercise'];
+        const activityKeywords = [
+            'tập', 'chạy', 'yoga', 'gym', 'bơi', 'đạp xe', 'thể dục', 'luyện',
+            'exercise', 'hoạt động', 'vận động', 'thể thao', 'boxing', 'dance'
+        ];
         return activityKeywords.some(function(k) { return msg.includes(k); });
     }
 
     isTimeRelated(msg) {
-        const timeKeywords = ['mấy giờ', 'giờ nào', 'khi nào', 'sáng', 'trưa', 'chiều', 'tối'];
+        const timeKeywords = [
+            'mấy giờ', 'giờ nào', 'khi nào', 'sáng', 'trưa', 'chiều', 'tối',
+            'thời gian', 'lúc nào', 'ngày', 'tuần', 'tháng'
+        ];
         return timeKeywords.some(function(k) { return msg.includes(k); });
     }
 
-    getGreeting() {
+    getRandomGreeting() {
         const greetings = [
             '👋 Xin chào! Bạn khỏe không? Tôi là AI trợ lý sức khỏe của bạn.',
             '😊 Chào bạn! Rất vui được gặp bạn. Hôm nay tôi có thể giúp gì?',
-            '👋 Hi! Tôi ở đây để hỗ trợ sức khỏe của bạn.'
+            '👋 Hi! Tôi ở đây để hỗ trợ sức khỏe của bạn.',
+            '🌟 Chào! Hôm nay bạn cảm thấy thế nào?',
+            '💚 Xin chào bạn! Mình là HealthChat. Bạn có vấn đề gì không?'
         ];
-        return greetings[Math.floor(Math.random() * greetings.length)];
+        return this.getRandomElement(greetings);
+    }
+
+    getRandomThanksResponse() {
+        const responses = [
+            '😊 Không có chi! Tôi luôn sẵn lòng giúp bạn. Bạn có câu hỏi nào khác không?',
+            '🌟 Vui lòng! Đó là công việc của tôi. Còn gì tôi có thể giúp không?',
+            '💚 Không cần phải cảm ơn! Hãy tiếp tục hỏi tôi bất cứ điều gì.',
+            '😄 Rất vui được giúp bạn! Có câu hỏi tiếp theo không?'
+        ];
+        return this.getRandomElement(responses);
+    }
+
+    getRandomApologyResponse() {
+        const responses = [
+            '😄 Không sao! Không cần xin lỗi. Hãy cứ thoải mái hỏi tôi bất cứ điều gì!',
+            '💚 Không có vấn đề gì cả! Mình đây để giúp bạn.',
+            '😊 Đừng lo! Hãy tiếp tục đặt câu hỏi của bạn.',
+            '🌟 Không cần xin lỗi! Chúng ta là một đội ngũ.'
+        ];
+        return this.getRandomElement(responses);
+    }
+
+    handleMentalHealthQuestion(lowerMsg) {
+        if (lowerMsg.includes('stress') || lowerMsg.includes('căng thẳng')) {
+            return this.getRandomResponse([
+                '😰 Giảm stress:\n1. Thiền 10-15 phút/ngày\n2. Tập thở sâu\n3. Nghe nhạc yêu thích\n4. Đi dạo 20-30 phút\n5. Tập thể dục 30 phút/ngày',
+                '😓 Stress là kẻ thù của sức khỏe!\n\n💪 Cách đối phó:\n• Thiền hoặc yoga\n• Vận động thể chất\n• Gặp gỡ bạn bè\n• Làm điều yêu thích\n• Ngủ đủ',
+                '😟 Quá tải tinh thần?\n\n🌟 Thử:\n1. Thiền 15 phút\n2. Tập thể dục\n3. Gặp bạn bè\n4. Nghe nhạc\n5. Tắm nước ấm'
+            ]);
+        }
+
+        if (lowerMsg.includes('lo') || lowerMsg.includes('lo lắng')) {
+            return this.getRandomResponse([
+                '💭 Lo lắng quá?\n\n✅ Cách xử lý:\n1. Nhận diện nỗi sợ\n2. Tập thở sâu 5 phút\n3. Tập thể dục để giải tỏa\n4. Nói chuyện với ai đó\n5. Ghi chép suy nghĩ ra giấy',
+                '😰 Cảm thấy bồn chồn?\n\n💡 Giải pháp:\n• Thiền mindfulness\n• Tập yoga nhẹ\n• Viết nhật ký\n• Gặp bạn bè\n• Làm thứ yêu thích'
+            ]);
+        }
+
+        if (lowerMsg.includes('buồn') || lowerMsg.includes('chán')) {
+            return this.getRandomResponse([
+                '😔 Cảm thấy buồn bã?\n\n💚 Cách cải thiện:\n1. Tập thể dục tăng endorphin\n2. Gặp gỡ người thân\n3. Làm hoạt động yêu thích\n4. Đi ngoài trời\n5. Hỗ trợ tâm lý nếu cần',
+                '😢 Buồn là cảm xúc tự nhiên!\n\n💝 Nhưng:\n• Tập luyện giúp cải thiện\n• Gặp bạn bè\n• Chia sẻ với người tin cậy\n• Chăm sóc bản thân\n• Tìm ý nghĩa sống'
+            ]);
+        }
+
+        return this.getRandomResponse([
+            '❤️ Tâm lý khỏe = Sức khỏe toàn diện! Hãy chăm sóc tâm lý bạn.',
+            '💚 Hạnh phúc là sức khỏe tuyệt vời! Hãy tìm niềm vui hàng ngày.'
+        ]);
+    }
+
+    handleEmotionalQuestion(lowerMsg) {
+        return this.getRandomResponse([
+            '🎭 Cảm xúc là một phần của cuộc sống!\n\n✅ Chấp nhận và quản lý:\n1. Thừa nhận cảm xúc\n2. Tìm nguyên nhân\n3. Nói chuyện với người khác\n4. Tập thể dục\n5. Tìm cách giải quyết',
+            '💭 Tâm trạng tốt hôm nay không?\n\n✨ Để cảm thấy tốt hơn:\n• Tập thể dục 30 phút\n• Nghe nhạc yêu thích\n• Gặp bạn bè\n• Làm điều bạn yêu\n• Ngủ đủ giấc'
+        ]);
+    }
+
+    handleSleepQuestion(lowerMsg) {
+        if (lowerMsg.includes('mất ngủ') || lowerMsg.includes('không ngủ')) {
+            return this.getRandomResponse([
+                '😴 Khắc phục mất ngủ:\n1. Không dùng điện thoại trước ngủ\n2. Phòng tối, yên tĩnh\n3. Ngủ cùng giờ mỗi ngày\n4. Tránh caffein sau 3 PM\n5. Tập thể dục buổi sáng',
+                '🌙 Không ngủ được?\n\n💤 Thử:\n• Tắt điện thoại 1 giờ trước\n• Phòng lạnh, tối, yên tĩnh\n• Thiền 10 phút\n• Không nằm quá lâu\n• Uống sữa ấm',
+                '😪 Mất ngủ khiến thân thể kiệt sức!\n\n🛌 Giải pháp:\n1. Lên giường cùng giờ\n2. Tắt hết thiết bị\n3. Phòng 16-18°C\n4. Tập sáng\n5. Thiền trước ngủ'
+            ]);
+        }
+
+        return this.getRandomResponse([
+            '😴 Ngủ 7-9 giờ/ngày giúp bạn khỏe mạnh và tập trung tốt hơn.',
+            '🛌 Giấc ngủ chất lượng = Sức khỏe tuyệt vời!\n\n💡 Mẹo:\n• Ngủ đúng giờ\n• Không điện thoại\n• Phòng yên tĩnh\n• Tập buổi sáng'
+        ]);
+    }
+
+    handleWeightQuestion(lowerMsg) {
+        if (lowerMsg.includes('giảm cân')) {
+            return this.getRandomResponse([
+                '💪 Giảm cân an toàn:\n1. Ăn uống lành mạnh\n2. Tập 150-200 phút/tuần\n3. Uống nước đủ\n4. Ăn từ từ, nhai kỹ\n5. Không bỏ bữa',
+                '⚖️ Muốn giảm cân?\n\n✅ Bí quyết:\n• Ăn 70% rau, 20% protein, 10% carbs\n• Tập 30 phút/ngày\n• Uống 3 lít nước\n• Ngủ 8 giờ/đêm\n• Kiên trì 8-12 tuần',
+                '🎯 Giảm cân cần:\n\n💡 Plan:\n1. Ăn lành mạnh\n2. Tập thể dục\n3. Uống đủ nước\n4. Ngủ đủ\n5. Kiên trì'
+            ]);
+        }
+
+        if (lowerMsg.includes('tăng cân') || lowerMsg.includes('tăng cơ')) {
+            return this.getRandomResponse([
+                '💪 Tăng cơ bắp:\n1. Ăn protein (1.6-2.2g/kg)\n2. Tập sức mạnh 3-4 lần/tuần\n3. Ngủ 7-9 giờ/đêm\n4. Tăng calories\n5. Kiên trì 8-12 tuần',
+                '🦵 Xây dựng cơ bắp?\n\n🔥 Cấu thành:\n• Protein 40% (gà, cá, trứng)\n• Carbs 40% (gạo, bánh mì)\n• Mỡ 20% (dầu, hạt)\n• Tập 4 lần/tuần\n• Ngủ 8 giờ',
+                '💯 Tăng cơ = Tập + Ăn + Ngủ\n\n✨ Công thức:\n1. Gym 3-4 lần/tuần\n2. Ăn protein 1.8g/kg\n3. Ngủ 7-9 giờ\n4. Uống nước\n5. Kiên trì'
+            ]);
+        }
+
+        return this.getRandomResponse([
+            '⚖️ Cân nặng lý tưởng = Cảm thấy khỏe và vui vẻ!',
+            '💪 BMI khỏe: 18.5-24.9. Tập và ăn lành mạnh là chìa khóa!'
+        ]);
     }
 
     handleHealthQuestion(lowerMsg) {
         if (lowerMsg.includes('mệt')) {
-            return '😴 Bạn cảm thấy mệt mỏi?\n\n✅ Khắc phục:\n1. Ngủ 7-9 giờ mỗi đêm\n2. Ăn bữa sáng lành mạnh\n3. Uống 8-10 cốc nước/ngày\n4. Tập luyện 20-30 phút/ngày\n5. Kiểm tra với bác sĩ nếu kéo dài';
+            return this.getRandomResponse([
+                '😴 Bạn cảm thấy mệt mỏi?\n\n✅ Khắc phục:\n1. Ngủ 7-9 giờ mỗi đêm\n2. Ăn bữa sáng lành mạnh\n3. Uống 8-10 cốc nước/ngày\n4. Tập luyện 20-30 phút/ngày\n5. Kiểm tra với bác sĩ nếu kéo dài',
+                '😩 Mệt mỏi là dấu hiệu cơ thể cần nghỉ ngơi!\n\n💡 Gợi ý:\n• Ngủ sớm hơn 1 giờ\n• Ăn nhẹ nhưng đủ chất\n• Uống đủ nước\n• Tập nhẹ 15 phút\n• Không quá tải việc',
+                '😔 Cảm thấy mệt là bình thường! Nhưng cần chú ý:\n\n🔍 Kiểm tra:\n1. Bạn ngủ đủ?\n2. Ăn uống đủ?\n3. Có stress không?\n4. Tập thể dục?\n5. Uống nước?'
+            ]);
         }
 
-        if (lowerMsg.includes('stress') || lowerMsg.includes('căng thẳng')) {
-            return '😰 Giảm stress:\n1. Thiền 10-15 phút/ngày\n2. Tập thở sâu\n3. Nghe nhạc yêu thích\n4. Đi dạo 20-30 phút\n5. Tập thể dục 30 phút/ngày';
-        }
-
-        if (lowerMsg.includes('giảm cân')) {
-            return '💪 Giảm cân an toàn:\n1. Ăn uống lành mạnh\n2. Tập 150-200 phút/tuần\n3. Uống nước đủ\n4. Ăn từ từ, nhai kỹ\n5. Không bỏ bữa';
-        }
-
-        if (lowerMsg.includes('tăng cơ')) {
-            return '💪 Tăng cơ bắp:\n1. Ăn protein (1.6-2.2g/kg)\n2. Tập sức mạnh 3-4 lần/tuần\n3. Ngủ 7-9 giờ/đêm\n4. Tăng calories\n5. Kiên trì 8-12 tuần';
-        }
-
-        if (lowerMsg.includes('mất ngủ')) {
-            return '😴 Khắc phục mất ngủ:\n1. Không dùng điện thoại trước ngủ\n2. Phòng tối, yên tĩnh\n3. Ngủ cùng giờ mỗi ngày\n4. Tránh caffein sau 3 PM\n5. Tập thể dục buổi sáng';
-        }
-
-        return '❤️ Sức khỏe là tài sản lớn nhất! Hãy ăn lành mạnh, tập luyện, ngủ đủ, quản lý stress.';
+        return this.getRandomResponse([
+            '❤️ Sức khỏe là tài sản lớn nhất! Hãy ăn lành mạnh, tập luyện, ngủ đủ, quản lý stress.',
+            '💚 Khỏe mạnh = Lành mạnh tâm hồn + Thể chất khỏe mạnh!\n\n🎯 Công thức:\n• Ăn 60% rau 40% protein\n• Tập 30 phút/ngày\n• Ngủ 8 giờ/đêm\n• Uống 3 lít nước',
+            '🌟 Sức khỏe là khoản đầu tư tốt nhất! Chăm sóc cơ thể từ hôm nay.'
+        ]);
     }
 
     handleMealQuestion(lowerMsg) {
         if (lowerMsg.includes('sáng')) {
-            return '🥣 Bữa sáng lành mạnh:\n• Cháo yến mạch + trái cây + sữa chua\n• Trứng + bánh mì + rau\n• Sữa + ngũ cốc + dâu tây\n\n💡 Ăn trong 1 giờ sau thức dậy!';
+            return this.getRandomResponse([
+                '🥣 Bữa sáng lành mạnh:\n• Cháo yến mạch + trái cây + sữa chua\n• Trứng + bánh mì + rau\n• Sữa + ngũ cốc + dâu tây\n\n💡 Ăn trong 1 giờ sau thức dậy!',
+                '🍳 Bữa sáng là bữa quan trọng!\n\n✅ Gợi ý:\n• Trứng luộc + bánh mì\n• Yến mạch + mật ong\n• Sinh tố cà chua + granola\n• Cơm tấm + trứng chiên',
+                '🌅 Sáng sớm cần nạp năng lượng!\n\n💪 Chọn:\n1. Protein: trứng, sữa\n2. Carbs: bánh mì, cháo\n3. Vitamin: trái cây\n4. Uống nước ấm'
+            ]);
         }
 
-        if (lowerMsg.includes('trưa')) {
-            return '🍚 Bữa trưa cân bằng:\n• 50% rau xanh\n• 25% protein (cá, gà, tofu)\n• 25% carbs (cơm, khoai)\n\n💡 Ăn chậm, nhai kỹ!';
+        if (lowerMsg.includes('trưa') || lowerMsg.includes('bữa chính')) {
+            return this.getRandomResponse([
+                '🍚 Bữa trưa cân bằng:\n• 50% rau xanh\n• 25% protein (cá, gà, tofu)\n• 25% carbs (cơm, khoai)\n\n💡 Ăn chậm, nhai kỹ!',
+                '🥗 Bữa trưa lành mạnh:\n\n✅ Cấu thành:\n• Rau = 50%\n• Thịt = 30%\n• Carbs = 20%\n• Nước = đủ\n• Thời gian = 30 phút',
+                '🍛 Trưa cần bổ dưỡng!\n\n💡 Menu:\n1. Cơm/bánh mì\n2. Thịt nướng/cá hấp\n3. Rau luộc/salad\n4. Canh/soup\n5. Trái cây'
+            ]);
         }
 
         if (lowerMsg.includes('tối')) {
-            return '🍜 Bữa tối nhẹ:\n• Ăn 2-3 giờ trước ngủ\n• Cơm + canh + cá/gà\n• Tránh nặng, dầu mỡ\n\n💡 Giúp ngủ ngon!';
+            return this.getRandomResponse([
+                '🍜 Bữa tối nhẹ:\n• Ăn 2-3 giờ trước ngủ\n• Cơm + canh + cá/gà\n• Tránh nặng, dầu mỡ\n\n💡 Giúp ngủ ngon!',
+                '🌙 Bữa tối nên nhẹ!\n\n✅ Gợi ý:\n• Cá + rau luộc\n• Soup + bánh mì\n• Cơm chiên rau\n• Gà hấp lemongrass',
+                '🍖 Tối nên ăn sớm!\n\n💡 Tránh:\n• Ăn quá muộn\n• Ăn quá no\n• Ăn quá béo\n• Ăn quá cay\n• Caffein/rượu'
+            ]);
         }
 
-        if (lowerMsg.includes('protein')) {
-            return '💪 Thực phẩm giàu protein:\n🐟 Cá hồi, cá trê\n🍗 Gà, trứng\n🥛 Sữa, phomai\n🫘 Đậu, hạt\n\n💡 0.8-1g/kg cân nặng/ngày!';
+        if (lowerMsg.includes('protein') || lowerMsg.includes('nước')) {
+            return this.getRandomResponse([
+                '💪 Thực phẩm giàu protein:\n🐟 Cá hồi, cá trề\n🍗 Gà, trứng\n🥛 Sữa, phomai\n🫘 Đậu, hạt\n\n💡 0.8-1g/kg cân nặng/ngày!',
+                '🌊 Uống nước đúng cách:\n• 8-10 cốc/ngày\n• Uống ấm vào sáng sớm\n• Uống trước-sau tập\n• Uống trước khi khát\n\n💡 Nước tốt nhất!',
+                '🥤 Nước = Sinh mệnh!\n\n✅ Cách uống:\n• Sáng: 2 cốc nước ấm\n• Trưa: uống đủ\n• Chiều: tập xong uống\n• Tối: hạn chế\n• Đêm: uống nhỏ giọt'
+            ]);
         }
 
-        if (lowerMsg.includes('nước')) {
-            return '💧 Uống nước đúng cách:\n• 8-10 cốc/ngày\n• Uống ấm vào sáng sớm\n• Uống trước-sau tập\n• Uống trước khi khát\n\n💡 Nước tốt nhất!';
-        }
-
-        return '🍽️ Ăn uống lành mạnh: 50% rau, 25% protein, 25% carbs. Ăn 3 bữa chính + 1-2 snack.';
+        return this.getRandomResponse([
+            '🍽️ Ăn uống lành mạnh: 50% rau, 25% protein, 25% carbs. Ăn 3 bữa chính + 1-2 snack.',
+            '🥘 Dinh dưỡng cân bằng = Sức khỏe!\n\n✨ Quy tắc:\n• 60% rau quả\n• 30% protein\n• 10% carbs\n• Uống 3L nước/ngày',
+            '🍴 Ăn = Tình yêu với cơ thể!\n\n💚 Ưu tiên:\n1. Tươi sống\n2. Có chất dinh dưỡng\n3. Ít dầu mỡ\n4. Ít muối\n5. Không chế biến'
+        ]);
     }
 
     handleActivityQuestion(lowerMsg) {
         if (lowerMsg.includes('chạy')) {
-            return '🏃 Chạy bộ:\n• 30-45 phút, 3-4 lần/tuần\n• Nhịp độ vừa phải\n• Tăng từ từ\n• Giày tốt\n\n💡 Kiên trì 4-6 tuần!';
+            return this.getRandomResponse([
+                '🏃 Chạy bộ:\n• 30-45 phút, 3-4 lần/tuần\n• Nhịp độ vừa phải\n• Tăng từ từ\n• Giày tốt\n\n💡 Kiên trì 4-6 tuần!',
+                '🏃‍♀️ Chạy bộ rất tuyệt vời!\n\n✅ Lịch:\n• Thứ 2, 4, 6: 45 phút\n• Thứ 3, 5: Yoga\n• Cuối tuần: Nghỉ hoặc tập nhẹ',
+                '🎯 Bắt đầu chạy:\n\n💡 Tips:\n1. Giày chất lượng\n2. Khởi động 5 phút\n3. Chạy vừa đủ\n4. Kết thúc từ từ\n5. Stretching 5 phút'
+            ]);
         }
 
         if (lowerMsg.includes('yoga')) {
-            return '🧘 Yoga:\n• 20-30 phút/ngày\n• Tăng linh hoạt\n• Giảm stress\n• Sáng hoặc tối\n\n💡 Yoga + thiền = tuyệt vời!';
+            return this.getRandomResponse([
+                '🧘 Yoga:\n• 20-30 phút/ngày\n• Tăng linh hoạt\n• Giảm stress\n• Sáng hoặc tối\n\n💡 Yoga + thiền = tuyệt vời!',
+                '🧘‍♀️ Yoga giúp cân bằng!\n\n✨ Lợi ích:\n• Tăng tính linh hoạt\n• Giảm stress 50%\n• Cải thiện hô hấp\n• Tăng tập trung\n• Ngủ ngon hơn',
+                '🌸 Yoga mỗi sáng:\n\n💚 Tư thế:\n1. Tadasana - 1 phút\n2. Downward Dog - 1 phút\n3. Warrior I - 1 phút\n4. Lotus - 2 phút\n5. Savasana - 5 phút'
+            ]);
         }
 
         if (lowerMsg.includes('gym')) {
-            return '💪 Gym:\n• 3-4 lần/tuần, 45-60 phút\n• Ngày làm, ngày nghỉ\n• Ăn protein trước-sau\n• Ngủ đủ\n\n💡 Đừng quá tích cực!';
+            return this.getRandomResponse([
+                '💪 Gym:\n• 3-4 lần/tuần, 45-60 phút\n• Ngày làm, ngày nghỉ\n• Ăn protein trước-sau\n• Ngủ đủ\n\n💡 Đừng quá tích cực!',
+                '🏋️ Gym là đam mê!\n\n✅ Plan:\n• Thứ 2: Chân\n• Thứ 4: Lưng + Tay\n• Thứ 6: Ngực + Vai\n• Thứ 3, 5, 7: Cardio/Yoga',
+                '🎯 Gym bắt đầu:\n\n💡 Khởi động:\n1. 10 phút cardio\n2. Tập chính 40 phút\n3. 10 phút stretching\n• Ăn protein 30 phút sau\n• Ngủ 8 giờ'
+            ]);
         }
 
         if (lowerMsg.includes('bơi')) {
-            return '🏊 Bơi:\n• 30 phút, 2-3 lần/tuần\n• Rèn toàn bộ cơ\n• Không áp lực\n• Tốt cho tim\n\n💡 Thể thao hoàn hảo!';
+            return this.getRandomResponse([
+                '🏊 Bơi:\n• 30 phút, 2-3 lần/tuần\n• Rèn toàn bộ cơ\n• Không áp lực\n• Tốt cho tim\n\n💡 Thể thao hoàn hảo!',
+                '🏊‍♂️ Bơi = Thể thao toàn diện!\n\n✨ Lợi ích:\n• Rèn 95% cơ bắp\n• Không chấn thương\n• Tăng sức bền\n• Cải thiện hô hấp',
+                '💧 Bơi 3 lần/tuần:\n\n💪 Cách:\n1. Khởi động 5 phút\n2. Bơi chính 25 phút\n3. Kết thúc 5 phút\n• Ăn sau 2 giờ\n• Uống nước'
+            ]);
         }
 
-        return '💪 Tập 150 phút/tuần: cardio + sức mạnh. Chạy, gym, yoga, bơi.';
+        return this.getRandomResponse([
+            '💪 Tập 150 phút/tuần: cardio + sức mạnh. Chạy, gym, yoga, bơi.',
+            '🏃 Vận động = Sống lâu!\n\n✨ Lựa chọn:\n• Chạy bộ - cơn lửa\n• Yoga - bình yên\n• Gym - mạnh mẽ\n• Bơi - toàn diện\n• Đi bộ - nhẹ nhàng',
+            '🎯 Vận động hàng ngày = Sức khỏe!\n\n💡 Chọn:\n1. Điều yêu thích\n2. Kiên trì\n3. Dần dần tăng\n4. Kết hợp nhiều loại'
+        ]);
     }
 
     handleTimeQuestion(lowerMsg) {
         if (lowerMsg.includes('sáng')) {
-            return '☀️ Buổi sáng:\n6 AM: Thức dậy\n6:30 AM: Tập 30 phút\n7 AM: Tắm\n7:30 AM: Ăn sáng\n\n✅ Thức dậy sớm!';
+            return this.getRandomResponse([
+                '☀️ Buổi sáng:\n6 AM: Thức dậy\n6:30 AM: Tập 30 phút\n7 AM: Tắm\n7:30 AM: Ăn sáng\n\n✅ Thức dậy sớm!',
+                '🌅 Sáng sớm = Khởi đầu tốt!\n\n✨ Quy trình:\n• 6:00: Thức dậy\n• 6:10: Uống nước ấm\n• 6:30: Tập nhẹ\n• 7:00: Ăn sáng\n• 7:30: Chuẩn bị việc',
+                '🌄 Đón bình minh mỗi ngày:\n\n💪 Morning routine:\n1. Yoga 15 phút\n2. Ăn sáng 30 phút\n3. Chuẩn bị 15 phút\n4. Bắt đầu ngày'
+            ]);
         }
 
         if (lowerMsg.includes('trưa')) {
-            return '🌞 Buổi trưa:\n11:30 AM: Bữa chính\n12:30 PM: Tập nhẹ\n1 PM: Nghỉ 20 phút\n\n✅ Bữa ăn chính!';
+            return this.getRandomResponse([
+                '🌞 Buổi trưa:\n11:30 AM: Bữa chính\n12:30 PM: Tập nhẹ\n1 PM: Nghỉ 20 phút\n\n✅ Bữa ăn chính!',
+                '☀️ Giữa ngày:\n• 11:30: Ăn trưa\n• 12:30: Đi dạo nhẹ\n• 1:00: Nghỉ ngơi\n• 2:00: Làm việc',
+                '🍽️ Trưa là bữa khoẻ!\n\n✨ Lịch:\n• 11:30: Ăn\n• 12:30: Tập 15 phút\n• 1:00: Resting\n• 2:00: Tiếp tục'
+            ]);
         }
 
         if (lowerMsg.includes('chiều')) {
-            return '🏃 Buổi chiều (TỐI ƯU):\n3 PM: Ăn snack\n3:30 PM: Tập nặng\n4:30 PM: Kết thúc\n5 PM: Tắm\n\n✅ Năng lượng cao!';
+            return this.getRandomResponse([
+                '🏃 Buổi chiều (TỐI ƯU):\n3 PM: Ăn snack\n3:30 PM: Tập nặng\n4:30 PM: Kết thúc\n5 PM: Tắm\n\n✅ Năng lượng cao!',
+                '⚡ Chiều là lúc tập tốt!\n\n💪 Thời gian vàng:\n• 3:00: Snack\n• 3:30: Tập gym/cardio\n• 4:30: Kết thúc\n• 5:00: Tắm & Xả',
+                '🔥 Chiều năng lượng cao:\n\n✨ Plan:\n1. 3:00 - Ăn nhẹ\n2. 3:30 - Tập 60 phút\n3. 4:30 - Kết thúc\n4. 5:00 - Tắm'
+            ]);
         }
 
         if (lowerMsg.includes('tối')) {
-            return '🌙 Buổi tối:\n6:30 PM: Bữa tối nhẹ\n7:30 PM: Yoga 20 phút\n8 PM: Đi dạo\n9 PM: Chuẩn bị ngủ\n10 PM: Ngủ\n\n✅ Chuẩn bị ngủ!';
+            return this.getRandomResponse([
+                '🌙 Buổi tối:\n6:30 PM: Bữa tối nhẹ\n7:30 PM: Yoga 20 phút\n8 PM: Đi dạo\n9 PM: Chuẩn bị ngủ\n10 PM: Ngủ\n\n✅ Chuẩn bị ngủ!',
+                '🌅 Tối là lúc yên tĩnh!\n\n✨ Routine:\n• 6:30: Ăn tối\n• 7:30: Yoga/Stretching\n• 8:30: Đọc sách\n• 9:00: Chuẩn bị ngủ\n• 10:00: Ngủ',
+                '🌙 Buổi tối thư giãn:\n\n💤 Lịch:\n1. 6:30 - Ăn tối\n2. 7:30 - Yoga nhẹ\n3. 8:30 - Thư giãn\n4. 9:30 - Chuẩn bị\n5. 10:00 - Ngủ'
+            ]);
         }
 
-        return '⏰ Sáng (tập nhẹ) → Trưa (bữa chính) → Chiều (tập nặng) → Tối (thư giãn).';
+        return this.getRandomResponse([
+            '⏰ Sáng (tập nhẹ) → Trưa (bữa chính) → Chiều (tập nặng) → Tối (thư giãn).',
+            '🕐 Quy trình ngày hợp lý:\n\n✨ Cân bằng:\n• 6-9 AM: Khởi động\n• 11 AM - 1 PM: Ăn\n• 3-5 PM: Tập chính\n• 6-10 PM: Thư giãn',
+            '⏱️ Thời gian vàng:\n\n💡 Tối ưu:\n1. Sáng 6-7: Tập cardio\n2. Trưa 12-1: Ăn\n3. Chiều 3-5: Tập gym\n4. Tối 8-9: Yoga'
+        ]);
     }
 
     handleGeneralQuestion(lowerMsg, originalMsg) {
         if (originalMsg.length > 50) {
-            return '💭 Câu hỏi hay! Hãy cụ thể hơn để tôi giúp tốt nhất:\n• Vấn đề gì?\n• Muốn giải quyết sao?\n• Đã cố gắng gì chưa?';
+            return this.getRandomResponse([
+                '💭 Câu hỏi hay! Hãy cụ thể hơn để tôi giúp tốt nhất:\n• Vấn đề gì?\n• Muốn giải quyết sao?\n• Đã cố gắng gì chưa?',
+                '🤔 Câu hỏi dài! Hãy tóm tắt lại:\n\n✅ Tôi giúp:\n• Dinh dưỡng\n• Tập luyện\n• Giấc ngủ\n• Stress\n• Việc khác',
+                '📝 Hơi dài quá! Bạn muốn hỏi về:\n1. Sức khỏe?\n2. Ăn uống?\n3. Tập luyện?\n4. Giấc ngủ?\n5. Việc khác?'
+            ]) + this.getRightCareSuggestion();
         }
 
-        const responses = [
+        return this.getRandomResponse([
             '🤔 Câu hỏi hay! Bạn có thể mô tả rõ hơn được không?\n\n✅ Tôi giúp: dinh dưỡng, tập luyện, giấc ngủ, stress.',
             '💡 Thú vị! Cho tôi biết thêm chi tiết để giúp tốt nhất!',
             '👂 Tôi nghe bạn! Hãy nói chi tiết hơn để tôi hiểu rõ.',
-            '🎯 Hay lắm! Hãy cụ thể hóa để tôi giúp tối đa!'
-        ];
+            '🎯 Hay lắm! Hãy cụ thể hóa để tôi giúp tối đa!',
+            '💬 Mình hiểu! Bạn đang lo lắng về cái gì?',
+            '🌟 Ý tưởng hay! Bạn cần giúp gì cụ thể?'
+        ]) + this.getRightCareSuggestion();
+    }
 
-        return responses[Math.floor(Math.random() * responses.length)];
+    getRightCareSuggestion() {
+        const variants = [
+            '🔎 Nếu chưa rõ triệu chứng, bạn có thể tham khảo tại: ',
+            '💡 Muốn kiểm tra nhanh tình trạng sức khỏe, xem tại: ',
+            '🩺 Bạn có thể tư vấn thêm ở link này: ',
+            '📌 Nếu cần nguồn hỗ trợ chi tiết hơn, vào đây: ',
+            '🌐 Gợi ý một kênh kiểm tra sức khỏe hữu ích: '
+        ];
+        return '\n\n' + this.getRandomResponse(variants) +
+            '<a href="' + this.rightCareUrl + '" target="_blank" rel="noopener noreferrer">RightCare - Tư vấn sức khỏe</a>';
+    }
+
+    getRandomElement(array) {
+        return array[Math.floor(Math.random() * array.length)];
+    }
+
+    getRandomResponse(responses) {
+        return this.getRandomElement(responses);
     }
 
     escapeHtml(text) {
@@ -501,9 +943,8 @@ class InitialChatFlow {
         sendBtn.style.height = '40px';
         sendBtn.style.borderRadius = '50%';
         sendBtn.style.cursor = 'pointer';
-        sendBtn.style.fontSize = '18px';
+                sendBtn.style.fontSize = '18px';
         sendBtn.style.marginLeft = '10px';
-
         const self = this;
 
         sendBtn.addEventListener('click', function() {
@@ -764,6 +1205,7 @@ class HealthChatApp {
         this.currentFilterDays = 1;
         this.resetPasswordEmail = null;
         this.timerInterval = null;
+        this.historyPanelCollapsed = localStorage.getItem('historyPanelCollapsed') === '1';
         this.initializeEventListeners();
         
         if (appState.isAuthenticated) {
@@ -774,6 +1216,7 @@ class HealthChatApp {
     initializeEventListeners() {
         const self = this;
 
+        // ============== LOGIN & SIGNUP ==============
         const loginForm = document.getElementById('loginForm');
         if (loginForm) {
             loginForm.addEventListener('submit', function(e) { self.handleLogin(e); });
@@ -800,6 +1243,7 @@ class HealthChatApp {
             });
         }
 
+        // ============== FORGOT PASSWORD ==============
         const forgotPasswordLink = document.getElementById('forgotPasswordLink');
         if (forgotPasswordLink) {
             forgotPasswordLink.addEventListener('click', function(e) {
@@ -836,9 +1280,13 @@ class HealthChatApp {
             });
         }
 
+        // ============== SIDEBAR & NAVIGATION ==============
         const menuToggle = document.getElementById('menuToggle');
         if (menuToggle) {
-            menuToggle.addEventListener('click', function() { self.toggleSidebar(); });
+            menuToggle.addEventListener('click', function() {
+                if (!appState.isAuthenticated) return;
+                self.toggleSidebar();
+            });
         }
 
         const closeSidebar = document.getElementById('closeSidebar');
@@ -860,9 +1308,11 @@ class HealthChatApp {
             });
         });
 
+        // ============== PROFILE MENU ==============
         const avatarBtn = document.getElementById('avatarBtn');
         if (avatarBtn) {
             avatarBtn.addEventListener('click', function() {
+                if (!appState.isAuthenticated) return;
                 const profileMenu = document.getElementById('profileMenu');
                 if (profileMenu) profileMenu.classList.toggle('active');
             });
@@ -902,22 +1352,31 @@ class HealthChatApp {
 
         const backFromSecurity = document.getElementById('backFromSecurity');
         if (backFromSecurity) {
-            backFromSecurity.addEventListener('click', function() { self.goToPage('chat'); });
+            backFromSecurity.addEventListener('click', function() {
+                self.goToPage('chat');
+            });
         }
 
         const backFromStats = document.getElementById('backFromStats');
         if (backFromStats) {
-            backFromStats.addEventListener('click', function() { self.goToPage('chat'); });
+            backFromStats.addEventListener('click', function() {
+                self.goToPage('chat');
+            });
         }
 
         const logoutBtn = document.getElementById('logoutBtn');
         if (logoutBtn) {
-            logoutBtn.addEventListener('click', function() { self.handleLogout(); });
+            logoutBtn.addEventListener('click', function() {
+                self.handleLogout();
+            });
         }
 
+        // ============== CHAT & MESSAGES ==============
         const sendBtn = document.getElementById('mainSendBtn');
         if (sendBtn) {
-            sendBtn.addEventListener('click', function() { self.sendMainMessage(); });
+            sendBtn.addEventListener('click', function() {
+                self.sendMainMessage();
+            });
         }
 
         const mainChatInput = document.getElementById('mainChatInput');
@@ -929,7 +1388,9 @@ class HealthChatApp {
 
         const helpSendBtn = document.getElementById('helpSendBtn');
         if (helpSendBtn) {
-            helpSendBtn.addEventListener('click', function() { self.sendHelpMessage(); });
+            helpSendBtn.addEventListener('click', function() {
+                self.sendHelpMessage();
+            });
         }
 
         const helpInput = document.getElementById('helpInput');
@@ -939,6 +1400,7 @@ class HealthChatApp {
             });
         }
 
+        // ============== HEALTH ASSESSMENT ==============
         document.querySelectorAll('input[type="range"]').forEach(function(input) {
             input.addEventListener('input', function(e) {
                 const displayId = e.target.id + 'Display';
@@ -949,12 +1411,180 @@ class HealthChatApp {
 
         const submitHealthBtn = document.getElementById('submitHealthBtn');
         if (submitHealthBtn) {
-            submitHealthBtn.addEventListener('click', function() { self.submitHealthAssessment(); });
+            submitHealthBtn.addEventListener('click', function() {
+                self.submitHealthAssessment();
+            });
         }
 
         const clearAllHistoryBtn = document.getElementById('clearAllHistoryBtn');
         if (clearAllHistoryBtn) {
-            clearAllHistoryBtn.addEventListener('click', function() { self.clearAllHistory(); });
+            clearAllHistoryBtn.addEventListener('click', function() {
+                self.clearAllHistory();
+            });
+        }
+
+        // ============== PIN MANAGEMENT ==============
+        const generatePinBtn = document.getElementById('generatePinBtn');
+        if (generatePinBtn) {
+            generatePinBtn.addEventListener('click', function() {
+                self.generateNewPin();
+            });
+        }
+
+        const viewPinBtn = document.getElementById('viewPinBtn');
+        if (viewPinBtn) {
+            viewPinBtn.addEventListener('click', function() {
+                self.viewPins();
+            });
+        }
+
+        const closePinDisplayBtn = document.getElementById('closePinDisplayBtn');
+        if (closePinDisplayBtn) {
+            closePinDisplayBtn.addEventListener('click', function() {
+                document.getElementById('pinDisplayModal').classList.remove('active');
+            });
+        }
+
+        const closePinDisplayBtnBottom = document.getElementById('closePinDisplayBtnBottom');
+        if (closePinDisplayBtnBottom) {
+            closePinDisplayBtnBottom.addEventListener('click', function() {
+                document.getElementById('pinDisplayModal').classList.remove('active');
+            });
+        }
+
+        // ============== AVATAR UPLOAD ==============
+        const uploadAvatarBtn = document.getElementById('uploadAvatarBtn');
+        if (uploadAvatarBtn) {
+            uploadAvatarBtn.addEventListener('click', function() {
+                document.getElementById('avatarFileInput').click();
+            });
+        }
+
+        const avatarFileInput = document.getElementById('avatarFileInput');
+        if (avatarFileInput) {
+            avatarFileInput.addEventListener('change', function(e) {
+                self.handleAvatarUpload(e);
+            });
+        }
+
+        const confirmCropBtn = document.getElementById('confirmCropBtn');
+        if (confirmCropBtn) {
+            confirmCropBtn.addEventListener('click', function() {
+                self.confirmAvatarCrop();
+            });
+        }
+
+        const cancelCropBtn = document.getElementById('cancelCropBtn');
+        if (cancelCropBtn) {
+            cancelCropBtn.addEventListener('click', function() {
+                self.avatarCropManager.closeModal();
+            });
+        }
+
+        const closeCropBtn = document.getElementById('closeCropBtn');
+        if (closeCropBtn) {
+            closeCropBtn.addEventListener('click', function() {
+                self.avatarCropManager.closeModal();
+            });
+        }
+
+        // ============== PROFILE SETTINGS ==============
+        const updateProfileBtn = document.getElementById('updateProfileBtn');
+        if (updateProfileBtn) {
+            updateProfileBtn.addEventListener('click', function() {
+                self.updateProfile();
+            });
+        }
+
+        // ============== PASSWORD CHANGE ==============
+        const updatePasswordBtn = document.getElementById('updatePasswordBtn');
+        if (updatePasswordBtn) {
+            updatePasswordBtn.addEventListener('click', function() {
+                self.updatePassword();
+            });
+        }
+
+        // ============== THEME & COLOR ==============
+        const themeLight = document.getElementById('themeLight');
+        const themeDark = document.getElementById('themeDark');
+
+        if (themeLight) {
+            themeLight.addEventListener('change', function() {
+                self.setTheme('light');
+            });
+        }
+
+        if (themeDark) {
+            themeDark.addEventListener('change', function() {
+                self.setTheme('dark');
+            });
+        }
+
+        document.querySelectorAll('.color-btn').forEach(function(btn) {
+            btn.addEventListener('click', function() {
+                const color = this.getAttribute('data-color');
+                self.setThemeColor(color, this);
+            });
+        });
+        this.syncPresetColorButtons();
+
+        const customThemeColor = document.getElementById('customThemeColor');
+        const customThemeHex = document.getElementById('customThemeHex');
+        const applyCustomColorBtn = document.getElementById('applyCustomColorBtn');
+
+        if (customThemeColor) {
+            customThemeColor.addEventListener('input', function() {
+                if (customThemeHex) customThemeHex.value = this.value.toUpperCase();
+                self.setThemeColor(this.value);
+            });
+        }
+
+        if (customThemeHex) {
+            customThemeHex.addEventListener('keydown', function(e) {
+                if (e.key === 'Enter') {
+                    e.preventDefault();
+                    self.setThemeColor(this.value);
+                }
+            });
+        }
+
+        if (applyCustomColorBtn) {
+            applyCustomColorBtn.addEventListener('click', function() {
+                if (customThemeHex) self.setThemeColor(customThemeHex.value);
+            });
+        }
+
+        // ============== STATS FILTER ==============
+        document.querySelectorAll('.filter-btn').forEach(function(btn) {
+            btn.addEventListener('click', function() {
+                document.querySelectorAll('.filter-btn').forEach(function(b) { b.classList.remove('active'); });
+                this.classList.add('active');
+                const days = this.getAttribute('data-days');
+                self.currentFilterDays = parseInt(days);
+                self.initializeStatsPage();
+            });
+        });
+
+        // ============== CHAT HISTORY ==============
+        const newChatBtn = document.getElementById('newChatBtn');
+        if (newChatBtn) {
+            newChatBtn.addEventListener('click', function() {
+                self.startNewChat();
+            });
+        }
+
+        const collapseHistoryBtn = document.getElementById('collapseHistoryBtn');
+        if (collapseHistoryBtn) {
+            collapseHistoryBtn.addEventListener('click', function() {
+                self.setHistoryPanelCollapsed(true);
+            });
+        }
+
+        const expandHistoryBtn = document.getElementById('expandHistoryBtn');
+        if (expandHistoryBtn) {
+            expandHistoryBtn.addEventListener('click', function() {
+                self.setHistoryPanelCollapsed(false);
+            });
         }
 
         document.addEventListener('click', function(e) {
@@ -966,6 +1596,7 @@ class HealthChatApp {
         });
     }
 
+    // ============== LOGIN & AUTH METHODS ==============
     openForgotPasswordModal() {
         const modal = document.getElementById('forgotPasswordModal');
         if (modal) {
@@ -1050,25 +1681,30 @@ class HealthChatApp {
         const email = document.getElementById('loginEmail').value.trim();
         const password = document.getElementById('loginPassword').value;
 
-        if (email && password) {
-            const users = JSON.parse(localStorage.getItem('users') || '[]');
-            const user = users.find(function(u) { return u.email === email && u.password === password; });
+        if (!email || !password) {
+            alert('❌ Vui lòng điền email và mật khẩu!');
+            return;
+        }
 
-            if (user) {
-                appState.currentUser = user;
-                appState.isAuthenticated = true;
-                appState.saveToLocalStorage();
-                pinManager.loadPins(user.email);
-                
-                const userNameEl = document.getElementById('userName');
-                const userEmailEl = document.getElementById('userEmail');
-                if (userNameEl) userNameEl.textContent = user.name;
-                if (userEmailEl) userEmailEl.textContent = user.email;
-                
-                this.showInitialChat();
-            } else {
-                alert('❌ Email hoặc mật khẩu không chính xác!');
-            }
+        const users = JSON.parse(localStorage.getItem('users') || '[]');
+        const user = users.find(function(u) { return u.email === email && u.password === password; });
+
+        if (user) {
+            appState.currentUser = user;
+            appState.isAuthenticated = true;
+            appState.saveToLocalStorage();
+            pinManager.loadPins(user.email);
+            chatHistoryManager.loadHistories(user.email);
+            this.updateHistoryList();
+            
+            const userNameEl = document.getElementById('userName');
+            const userEmailEl = document.getElementById('userEmail');
+            if (userNameEl) userNameEl.textContent = user.name;
+            if (userEmailEl) userEmailEl.textContent = user.email;
+            
+            this.showInitialChat();
+        } else {
+            alert('❌ Email hoặc mật khẩu không chính xác!');
         }
     }
 
@@ -1124,6 +1760,9 @@ class HealthChatApp {
         appState.isAuthenticated = false;
         appState.currentUser = null;
         localStorage.removeItem('currentUser');
+        chatHistoryManager.loadHistories(null);
+        this.updateHistoryList();
+        this.setAuthUIState(false);
         this.goToPage('login');
     }
 
@@ -1145,6 +1784,33 @@ class HealthChatApp {
         }
     }
 
+    setHistoryPanelVisible(visible) {
+        document.body.classList.toggle('history-panel-visible', !!visible);
+        if (!visible) {
+            document.body.classList.remove('history-panel-collapsed');
+            return;
+        }
+        document.body.classList.toggle('history-panel-collapsed', !!this.historyPanelCollapsed);
+    }
+
+    setAuthUIState(isAuthenticated) {
+        document.body.classList.toggle('unauthenticated', !isAuthenticated);
+        if (!isAuthenticated) {
+            const profileMenu = document.getElementById('profileMenu');
+            if (profileMenu) profileMenu.classList.remove('active');
+            this.toggleSidebar(false);
+        }
+    }
+
+    setHistoryPanelCollapsed(collapsed) {
+        this.historyPanelCollapsed = !!collapsed;
+        localStorage.setItem('historyPanelCollapsed', this.historyPanelCollapsed ? '1' : '0');
+        if (document.body.classList.contains('history-panel-visible')) {
+            document.body.classList.toggle('history-panel-collapsed', this.historyPanelCollapsed);
+        }
+    }
+
+    // ============== PAGE NAVIGATION ==============
     goToPage(pageName) {
         document.querySelectorAll('.page').forEach(function(page) { page.classList.remove('active'); });
         
@@ -1182,9 +1848,16 @@ class HealthChatApp {
         } else if (pageName === 'health') {
             this.updateHealthDisplay();
         }
+
+        const shouldShowHistoryPanel = appState.isAuthenticated && pageName !== 'login' && pageName !== 'signup';
+        this.setHistoryPanelVisible(shouldShowHistoryPanel);
+        document.body.classList.remove('chat-fullscreen');
+        this.setAuthUIState(appState.isAuthenticated);
     }
 
     toggleSidebar(force) {
+        if (!appState.isAuthenticated && force !== false) return;
+
         const sidebar = document.getElementById('sidebar');
         const overlay = document.getElementById('overlay');
 
@@ -1204,11 +1877,15 @@ class HealthChatApp {
         }
     }
 
+    // ============== CHAT METHODS ==============
     sendMainMessage() {
         const input = document.getElementById('mainChatInput');
         const message = input.value.trim();
 
         if (message) {
+            const autoHealth = this.tryAutoSaveHealthFromMessage(message);
+            chatHistoryManager.addMessage(message, true);
+            this.updateHistoryList();
             const chatMessages = document.getElementById('chatMessages');
 
             const userBubble = document.createElement('div');
@@ -1224,7 +1901,10 @@ class HealthChatApp {
             setTimeout(function() {
                 if (loading) loading.style.display = 'none';
                 
-                const aiResponse = aiEngine.generateResponse(message);
+                const aiResponse = autoHealth ? autoHealth.reply : aiEngine.generateResponse(message);
+                chatHistoryManager.addMessage(aiResponse, false);
+                app.updateHistoryList();
+                
                 const aiBubble = document.createElement('div');
                 aiBubble.className = 'chat-bubble ai';
                 aiBubble.innerHTML = '<p>' + aiResponse + '</p>';
@@ -1234,6 +1914,84 @@ class HealthChatApp {
 
             chatMessages.scrollTop = chatMessages.scrollHeight;
         }
+    }
+
+    normalizeText(text) {
+        return (text || '')
+            .toLowerCase()
+            .normalize('NFD')
+            .replace(/[\u0300-\u036f]/g, '');
+    }
+
+    tryAutoSaveHealthFromMessage(message) {
+        const normalized = this.normalizeText(message);
+        const saveKeywords = [
+            'danh gia suc khoe',
+            'luu danh gia',
+            'luu suc khoe',
+            'cham diem suc khoe',
+            'cap nhat suc khoe'
+        ];
+
+        const shouldSave = saveKeywords.some(function(k) {
+            return normalized.includes(k);
+        });
+        if (!shouldSave) return null;
+
+        const numbers = (normalized.match(/\b\d{1,3}\b/g) || []).map(function(n) {
+            return parseInt(n, 10);
+        }).filter(function(n) {
+            return !isNaN(n) && n >= 0 && n <= 100;
+        });
+
+        const targetScore = numbers.length > 0 ? numbers[numbers.length - 1] : 70;
+        const assessment = this.buildAutoHealthAssessment(targetScore);
+        this.applySavedHealthAssessment(assessment);
+
+        return {
+            saved: true,
+            reply: '✅ Mình đã tự lưu đánh giá sức khỏe cho bạn: <strong>' + assessment.score + '/100</strong>.\n' +
+                '💪 Năng lượng ' + assessment.energy + '/10, 😴 Giấc ngủ ' + assessment.sleep + '/10, 😊 Tâm trạng ' + assessment.mood + '/10, 😰 Stress ' + assessment.stress + '/10, 🍽️ Cơn đói ' + assessment.hunger + '/10.'
+        };
+    }
+
+    buildAutoHealthAssessment(targetScore) {
+        const safeScore = Math.max(0, Math.min(100, targetScore));
+        const level = Math.max(1, Math.min(10, Math.round(safeScore / 10)));
+
+        const requiredX = Math.round((safeScore / 10) * 5 - (level * 4));
+        const x = Math.max(0, Math.min(10, requiredX)); // x = (10 - stress)
+        const stress = Math.max(0, Math.min(10, 10 - x));
+        const finalScore = Math.round(((level + level + level + (10 - stress) + level) / 5) * 10);
+
+        return {
+            date: new Date().toLocaleDateString('vi-VN'),
+            time: new Date().toLocaleTimeString('vi-VN'),
+            energy: level,
+            sleep: level,
+            mood: level,
+            stress: stress,
+            hunger: level,
+            score: finalScore
+        };
+    }
+
+    applySavedHealthAssessment(assessment) {
+        appState.healthHistory.push(assessment);
+        appState.saveToLocalStorage();
+
+        const scoreEl = document.getElementById('wellBeingScore');
+        if (scoreEl) scoreEl.textContent = assessment.score;
+
+        const statusEl = document.getElementById('scoreStatus');
+        if (statusEl) {
+            let status = '😊 Tuyệt vời!';
+            if (assessment.score < 50) status = '😔 Cần cải thiện';
+            else if (assessment.score < 70) status = '😐 Bình thường';
+            statusEl.textContent = status + ' (' + assessment.score + '/100)';
+        }
+
+        this.updateHealthHistory();
     }
 
     sendHelpMessage() {
@@ -1268,6 +2026,7 @@ class HealthChatApp {
         }
     }
 
+    // ============== SCHEDULE METHODS ==============
     generateSchedule() {
         const schedule = [];
         const pref = appState.initialHealthData.preferences || '';
@@ -1319,6 +2078,7 @@ class HealthChatApp {
         }
     }
 
+    // ============== HEALTH ASSESSMENT METHODS ==============
     submitHealthAssessment() {
         const energy = parseInt(document.getElementById('energyLevel').value);
         const sleep = parseInt(document.getElementById('sleepQuality').value);
@@ -1367,261 +2127,60 @@ class HealthChatApp {
     }
 
     updateHealthHistory() {
-        const historyContainer = document.getElementById('healthHistory');
-        if (historyContainer) {
-            if (appState.healthHistory.length === 0) {
-                historyContainer.innerHTML = '<div class="history-empty">📝 Chưa có đánh giá nào. Hãy bắt đầu đánh giá sức khỏe của bạn!</div>';
-            } else {
-                const sorted = appState.healthHistory.slice().reverse();
-                historyContainer.innerHTML = sorted.map(function(item, index) {
-                    return '<div class="history-item">' +
-                        '<div class="history-item-content">' +
-                            '<div class="history-date">📅 ' + item.date + ' ' + item.time + '</div>' +
-                            '<div class="history-item-data">' +
-                                '<p>💪 Năng lượng: <strong>' + item.energy + '/10</strong></p>' +
-                                '<p>😴 Giấc ngủ: <strong>' + item.sleep + '/10</strong></p>' +
-                                '<p>😊 Tâm trạng: <strong>' + item.mood + '/10</strong></p>' +
-                                '<p>😰 Stress: <strong>' + item.stress + '/10</strong></p>' +
-                                '<p>🍽️ Cơn đói: <strong>' + item.hunger + '/10</strong></p>' +
-                            '</div>' +
-                            '<div class="history-item-score">Điểm sức khỏe: <strong>' + item.score + '/100</strong></div>' +
-                        '</div>' +
-                        '<button class="btn-delete-item" data-index="' + index + '" title="Xóa">✕</button>' +
-                        '</div>';
-                }).join('');
+        const healthHistory = document.getElementById('healthHistory');
+        if (!healthHistory) return;
 
-                const self = this;
-                document.querySelectorAll('.btn-delete-item').forEach(function(btn) {
-                    btn.addEventListener('click', function() {
-                        const index = parseInt(this.getAttribute('data-index'));
-                        const actualIndex = appState.healthHistory.length - 1 - index;
-                        self.deleteHealthRecord(actualIndex);
-                    });
-                });
-            }
-        }
-    }
-
-    deleteHealthRecord(index) {
-        if (index >= 0 && index < appState.healthHistory.length) {
-            appState.healthHistory.splice(index, 1);
-            appState.saveToLocalStorage();
-            this.updateHealthHistory();
-        }
-    }
-
-    clearAllHistory() {
         if (appState.healthHistory.length === 0) {
-            alert('❌ Không có lịch sử để xóa!');
+            healthHistory.innerHTML = '<div class="history-empty">Chưa có dữ liệu đánh giá</div>';
             return;
         }
 
-        if (confirm('⚠️ Xóa tất cả lịch sử? Không thể hoàn tác!')) {
+        healthHistory.innerHTML = appState.healthHistory.reverse().map(function(item, index) {
+            return '<div class="history-item">' +
+                '<div class="history-item-content">' +
+                '<div class="history-date">' + item.date + ' ' + item.time + '</div>' +
+                '<div class="history-item-data">' +
+                '<p>💪 Năng Lượng: ' + item.energy + '/10</p>' +
+                '<p>😴 Giấc Ngủ: ' + item.sleep + '/10</p>' +
+                '<p>😊 Tâm Trạng: ' + item.mood + '/10</p>' +
+                '<p>😰 Stress: ' + item.stress + '/10</p>' +
+                '<p>🍽️ Cơn Đói: ' + item.hunger + '/10</p>' +
+                '</div>' +
+                '<div class="history-item-score">🎯 Điểm: ' + item.score + '/100</div>' +
+                '</div>' +
+                '<button class="btn-delete-item" onclick="app.deleteHealthRecord(' + index + ')">🗑️</button>' +
+                '</div>';
+        }).join('');
+    }
+
+    deleteHealthRecord(index) {
+        appState.healthHistory.reverse();
+        appState.healthHistory.splice(index, 1);
+        appState.healthHistory.reverse();
+        appState.saveToLocalStorage();
+        this.updateHealthHistory();
+    }
+
+    clearAllHistory() {
+        if (confirm('❌ Bạn chắc chắn muốn xóa tất cả lịch sử sức khỏe?')) {
             appState.healthHistory = [];
             appState.saveToLocalStorage();
-            
-            const scoreEl = document.getElementById('wellBeingScore');
-            if (scoreEl) scoreEl.textContent = '0';
-            
-            const statusEl = document.getElementById('scoreStatus');
-            if (statusEl) statusEl.textContent = 'Chưa đánh giá';
-            
             this.updateHealthHistory();
-            alert('✅ Đã xóa tất cả lịch sử!');
+            alert('✅ Đã xóa tất cả!');
         }
     }
 
-    initializeSettingsPage() {
-        const settings = this.settingsManager.getSettings();
-        const self = this;
-        
-        const nameInput = document.getElementById('settingsName');
-        const emailInput = document.getElementById('settingsEmail');
-        if (nameInput && appState.currentUser) nameInput.value = appState.currentUser.name || '';
-        if (emailInput && appState.currentUser) emailInput.value = appState.currentUser.email || '';
-
-        document.querySelectorAll('input[name="theme"]').forEach(function(radio) {
-            if ((radio.value === 'dark' && document.body.classList.contains('dark-mode')) ||
-                (radio.value === 'light' && !document.body.classList.contains('dark-mode'))) {
-                radio.checked = true;
-            }
-
-            radio.addEventListener('change', function(e) {
-                if (e.target.value === 'dark') {
-                    document.body.classList.add('dark-mode');
-                    const s = self.settingsManager.getSettings();
-                    s.theme = 'dark';
-                    self.settingsManager.saveSettings(s);
-                } else {
-                    document.body.classList.remove('dark-mode');
-                    const s = self.settingsManager.getSettings();
-                    s.theme = 'light';
-                    self.settingsManager.saveSettings(s);
-                }
-            });
-        });
-
-        document.querySelectorAll('.color-btn').forEach(function(btn) {
-            const color = btn.getAttribute('data-color');
-            btn.style.backgroundColor = color;
-            if (settings.primaryColor === color) btn.classList.add('active');
-            btn.addEventListener('click', function() {
-                document.querySelectorAll('.color-btn').forEach(function(b) { b.classList.remove('active'); });
-                btn.classList.add('active');
-                self.settingsManager.setThemeColor(color);
-                const s = self.settingsManager.getSettings();
-                s.primaryColor = color;
-                self.settingsManager.saveSettings(s);
-            });
-        });
-
-        const uploadAvatarBtn = document.getElementById('uploadAvatarBtn');
-        const avatarFileInput = document.getElementById('avatarFileInput');
-
-        if (uploadAvatarBtn && avatarFileInput) {
-            uploadAvatarBtn.addEventListener('click', function() {
-                avatarFileInput.click();
-            });
-
-            avatarFileInput.addEventListener('change', function(e) {
-                const file = e.target.files[0];
-                if (file) {
-                    const reader = new FileReader();
-                    reader.onload = function(event) {
-                        self.avatarCropManager.openModal(event.target.result);
-                    };
-                    reader.readAsDataURL(file);
-                }
-            });
-        }
-
-        const confirmCropBtn = document.getElementById('confirmCropBtn');
-        if (confirmCropBtn) {
-            confirmCropBtn.addEventListener('click', function() {
-                self.avatarCropManager.cropImage().then(function(croppedImage) {
-                    self.settingsManager.updateAvatarDisplay(croppedImage);
-                    const s = self.settingsManager.getSettings();
-                    s.avatar = croppedImage;
-                    self.settingsManager.saveSettings(s);
-                    alert('✅ Avatar đã cập nhật!');
-                    self.avatarCropManager.closeModal();
-                });
-            });
-        }
-
-        const cancelCropBtn = document.getElementById('cancelCropBtn');
-        const closeCropBtn = document.getElementById('closeCropBtn');
-        if (cancelCropBtn) {
-            cancelCropBtn.addEventListener('click', function() {
-                self.avatarCropManager.closeModal();
-            });
-        }
-        if (closeCropBtn) {
-            closeCropBtn.addEventListener('click', function() {
-                self.avatarCropManager.closeModal();
-            });
-        }
-
-        const updateProfileBtn = document.getElementById('updateProfileBtn');
-        if (updateProfileBtn) {
-            updateProfileBtn.addEventListener('click', function() {
-                const newName = document.getElementById('settingsName').value.trim();
-                const newEmail = document.getElementById('settingsEmail').value.trim();
-
-                if (!newName || !newEmail) {
-                    alert('❌ Vui lòng điền đầy đủ!');
-                    return;
-                }
-
-                appState.currentUser.name = newName;
-                appState.currentUser.email = newEmail;
-                appState.saveToLocalStorage();
-
-                document.getElementById('userName').textContent = newName;
-                document.getElementById('userEmail').textContent = newEmail;
-
-                alert('✅ Thông tin đã cập nhật!');
-            });
-        }
-
-        const updatePasswordBtn = document.getElementById('updatePasswordBtn');
-        if (updatePasswordBtn) {
-            updatePasswordBtn.addEventListener('click', function() {
-                const currentPwd = document.getElementById('currentPassword').value;
-                const newPwd = document.getElementById('newPassword').value;
-                const confirmPwd = document.getElementById('confirmPassword').value;
-
-                if (!currentPwd || !newPwd || !confirmPwd) {
-                    alert('❌ Vui lòng điền đầy đủ!');
-                    return;
-                }
-
-                if (currentPwd !== appState.currentUser.password) {
-                    alert('❌ Mật khẩu sai!');
-                    return;
-                }
-
-                if (newPwd !== confirmPwd) {
-                    alert('❌ Mật khẩu không trùng!');
-                    return;
-                }
-
-                if (newPwd.length < 6) {
-                    alert('❌ Mật khẩu 6+ ký tự!');
-                    return;
-                }
-
-                const users = JSON.parse(localStorage.getItem('users') || '[]');
-                const userIdx = users.findIndex(function(u) { return u.email === appState.currentUser.email; });
-                if (userIdx !== -1) {
-                    users[userIdx].password = newPwd;
-                    localStorage.setItem('users', JSON.stringify(users));
-                    appState.currentUser.password = newPwd;
-                    appState.saveToLocalStorage();
-                    alert('✅ Mật khẩu cập nhật!');
-                    
-                    document.getElementById('currentPassword').value = '';
-                    document.getElementById('newPassword').value = '';
-                    document.getElementById('confirmPassword').value = '';
-                }
-            });
-        }
-    }
-
-    initializeSecurityPage() {
-        const self = this;
-
-        const generatePinBtn = document.getElementById('generatePinBtn');
-        if (generatePinBtn) {
-            generatePinBtn.addEventListener('click', function() {
-                self.generateNewPin();
-            });
-        }
-
-        const viewPinBtn = document.getElementById('viewPinBtn');
-        if (viewPinBtn) {
-            viewPinBtn.addEventListener('click', function() {
-                self.viewPins();
-            });
-        }
-
-        this.updatePinStatus();
-        this.startPinTimer();
-    }
-
+    // ============== PIN MANAGEMENT ==============
     generateNewPin() {
         if (!pinManager.createdDate) {
-            // Chưa tạo lần nào
             const pins = pinManager.generatePins();
             this.displayPins(pins);
             this.updatePinStatus();
         } else if (pinManager.canGenerateNewPins()) {
-            // Đã dùng hết 8 mã PIN, được tạo mới
             const pins = pinManager.generatePins();
             this.displayPins(pins);
             this.updatePinStatus();
         } else {
-            // Chưa dùng hết 8 mã PIN
             const remaining = pinManager.getPinsStatus();
             alert('⚠️ Bạn còn ' + remaining + ' mã PIN chưa sử dụng!\n\nChỉ được tạo mã PIN mới khi đã dùng hết 8 mã hiện tại.');
         }
@@ -1631,21 +2190,14 @@ class HealthChatApp {
         const modal = document.getElementById('pinDisplayModal');
         const pinsGrid = document.getElementById('pinsGrid');
 
+        if (!pinsGrid) return;
+
         pinsGrid.innerHTML = pins.map(function(pin) {
-            return '<div class="pin-box">' + pin + '</div>';
+            const isUsed = pinManager.usedPins.includes(pin);
+            return '<div class="pin-box' + (isUsed ? ' pin-used' : '') + '">' + pin + '</div>';
         }).join('');
 
-        const closePinDisplayBtn = document.getElementById('closePinDisplayBtn');
-        const closePinDisplayBtnBottom = document.getElementById('closePinDisplayBtnBottom');
-
-        const closePin = function() {
-            modal.classList.remove('active');
-        };
-
-        if (closePinDisplayBtn) closePinDisplayBtn.addEventListener('click', closePin);
-        if (closePinDisplayBtnBottom) closePinDisplayBtnBottom.addEventListener('click', closePin);
-
-        modal.classList.add('active');
+        if (modal) modal.classList.add('active');
     }
 
     viewPins() {
@@ -1656,7 +2208,6 @@ class HealthChatApp {
 
         const daysUntil = pinManager.getDaysUntilCanView();
 
-        // Nếu chưa đủ 30 ngày, KHÓA không cho xem
         if (daysUntil > 0) {
             const time = pinManager.getTimeUntilCanView();
             let timeStr = '';
@@ -1671,7 +2222,6 @@ class HealthChatApp {
             return;
         }
 
-        // Nếu đã đủ 30 ngày, hiển thị mã PIN
         this.displayPins(pinManager.pins);
     }
 
@@ -1705,76 +2255,209 @@ class HealthChatApp {
         }
     }
 
-    startPinTimer() {
-        const self = this;
-        if (this.timerInterval) clearInterval(this.timerInterval);
+    // ============== AVATAR METHODS ==============
+    handleAvatarUpload(e) {
+        const file = e.target.files[0];
+        if (file) {
+            const reader = new FileReader();
+            const self = this;
 
-        this.timerInterval = setInterval(function() {
-            if (pinManager.createdDate && !pinManager.canViewPins()) {
-                const time = pinManager.getTimeUntilCanView();
-                const timerEl = document.getElementById('countdownTimer');
-                
-                if (timerEl) {
-                    if (time.days > 0) {
-                        timerEl.textContent = time.days + ' ngày ' + time.hours + ' giờ ' + time.minutes + ' phút';
-                    } else if (time.hours > 0 || time.minutes > 0) {
-                        timerEl.textContent = time.hours + ' giờ ' + time.minutes + ' phút ' + time.seconds + ' giây';
-                    } else {
-                        timerEl.textContent = time.seconds + ' giây';
-                    }
+            reader.onload = function(event) {
+                self.avatarCropManager.openModal(event.target.result);
+            };
 
-                    // Cập nhật lại khi thời gian hết
-                    if (time.days === 0 && time.hours === 0 && time.minutes === 0 && time.seconds === 0) {
-                        self.updatePinStatus();
-                    }
-                }
-            }
-        }, 1000);
+            reader.readAsDataURL(file);
+        }
     }
 
-    initializeStatsPage() {
+    confirmAvatarCrop() {
         const self = this;
-        const filterBtns = document.querySelectorAll('.filter-btn');
-
-        filterBtns.forEach(function(btn) {
-            btn.addEventListener('click', function() {
-                filterBtns.forEach(function(b) { b.classList.remove('active'); });
-                btn.classList.add('active');
-                self.currentFilterDays = parseInt(btn.getAttribute('data-days'));
-                self.updateStatistics();
-            });
+        this.avatarCropManager.cropImage().then(function(croppedImageData) {
+            settingsManager.updateAvatarDisplay(croppedImageData);
+            const settings = settingsManager.getSettings();
+            settings.avatar = croppedImageData;
+            settingsManager.saveSettings(settings);
+            self.avatarCropManager.closeModal();
+            alert('✅ Avatar đã cập nhật!');
         });
-
-        this.updateStatistics();
     }
 
-    updateStatistics() {
-        const now = new Date();
-        const startDate = new Date(now.getTime() - this.currentFilterDays * 24 * 60 * 60 * 1000);
+    // ============== SETTINGS PAGE ==============
+    initializeSettingsPage() {
+        const nameInput = document.getElementById('settingsName');
+        const emailInput = document.getElementById('settingsEmail');
 
-        const filtered = appState.healthHistory.filter(function(item) {
-            const parts = item.date.split('/');
-            const itemDate = new Date(parts[2] + '-' + parts[1] + '-' + parts[0]);
-            return itemDate >= startDate;
-        });
+        if (nameInput && appState.currentUser) {
+            nameInput.value = appState.currentUser.name;
+        }
+        if (emailInput && appState.currentUser) {
+            emailInput.value = appState.currentUser.email;
+        }
 
-        if (filtered.length === 0) {
-            document.getElementById('avgScore').textContent = '0';
-            document.getElementById('avgEnergy').textContent = '0';
-            document.getElementById('avgSleep').textContent = '0';
-            document.getElementById('avgMood').textContent = '0';
-            document.getElementById('avgStress').textContent = '0';
-            document.getElementById('avgHunger').textContent = '0';
-            document.getElementById('detailedStats').innerHTML = '<p>Chưa có dữ liệu.</p>';
+        const settings = settingsManager.getSettings();
+        if (settings.theme === 'dark') {
+            document.getElementById('themeDark').checked = true;
+        } else {
+            document.getElementById('themeLight').checked = true;
+        }
+
+        const currentColor = settings.primaryColor || '#4CAF50';
+        const colorInput = document.getElementById('customThemeColor');
+        const hexInput = document.getElementById('customThemeHex');
+        if (colorInput) colorInput.value = currentColor;
+        if (hexInput) hexInput.value = currentColor.toUpperCase();
+        this.syncPresetColorButtons(this.normalizeHexColor(currentColor));
+    }
+
+    updateProfile() {
+        const name = document.getElementById('settingsName').value.trim();
+        const email = document.getElementById('settingsEmail').value.trim();
+
+        if (!name || !email) {
+            alert('❌ Vui lòng điền đầy đủ thông tin!');
             return;
         }
 
-        const avgScore = Math.round(filtered.reduce(function(a, b) { return a + b.score; }, 0) / filtered.length);
-        const avgEnergy = Math.round(filtered.reduce(function(a, b) { return a + b.energy; }, 0) / filtered.length);
-        const avgSleep = Math.round(filtered.reduce(function(a, b) { return a + b.sleep; }, 0) / filtered.length);
-        const avgMood = Math.round(filtered.reduce(function(a, b) { return a + b.mood; }, 0) / filtered.length);
-        const avgStress = Math.round(filtered.reduce(function(a, b) { return a + b.stress; }, 0) / filtered.length);
-        const avgHunger = Math.round(filtered.reduce(function(a, b) { return a + b.hunger; }, 0) / filtered.length);
+        if (appState.currentUser) {
+            appState.currentUser.name = name;
+            appState.currentUser.email = email;
+            appState.saveToLocalStorage();
+
+            document.getElementById('userName').textContent = name;
+            document.getElementById('userEmail').textContent = email;
+
+            alert('✅ Thông tin đã cập nhật!');
+        }
+    }
+
+    updatePassword() {
+        const currentPwd = document.getElementById('currentPassword').value;
+        const newPwd = document.getElementById('newPassword').value;
+        const confirmPwd = document.getElementById('confirmPassword').value;
+
+        if (!currentPwd || !newPwd || !confirmPwd) {
+            alert('❌ Vui lòng điền đầy đủ!');
+            return;
+        }
+
+        if (appState.currentUser && appState.currentUser.password !== currentPwd) {
+            alert('❌ Mật khẩu hiện tại không chính xác!');
+            return;
+        }
+
+        if (newPwd !== confirmPwd) {
+            alert('❌ Mật khẩu mới không trùng khớp!');
+            return;
+        }
+
+        if (newPwd.length < 6) {
+            alert('❌ Mật khẩu phải 6+ ký tự!');
+            return;
+        }
+
+        const users = JSON.parse(localStorage.getItem('users') || '[]');
+        const userIdx = users.findIndex(function(u) { return u.email === appState.currentUser.email; });
+
+        if (userIdx !== -1) {
+            users[userIdx].password = newPwd;
+            appState.currentUser.password = newPwd;
+            localStorage.setItem('users', JSON.stringify(users));
+            appState.saveToLocalStorage();
+
+            document.getElementById('currentPassword').value = '';
+            document.getElementById('newPassword').value = '';
+            document.getElementById('confirmPassword').value = '';
+
+            alert('✅ Mật khẩu đã cập nhật!');
+        }
+    }
+
+    // ============== SECURITY PAGE ==============
+    initializeSecurityPage() {
+        this.updatePinStatus();
+    }
+
+    // ============== THEME METHODS ==============
+    setTheme(theme) {
+        const settings = settingsManager.getSettings();
+        settings.theme = theme;
+        settingsManager.saveSettings(settings);
+
+        if (theme === 'dark') {
+            document.body.classList.add('dark-mode');
+        } else {
+            document.body.classList.remove('dark-mode');
+        }
+    }
+
+    setThemeColor(color, sourceBtn) {
+        const normalizedColor = this.normalizeHexColor(color);
+        if (!normalizedColor) {
+            alert('❌ Mã màu không hợp lệ. Dùng dạng #RRGGBB');
+            return;
+        }
+
+        this.syncPresetColorButtons(normalizedColor);
+
+        const colorInput = document.getElementById('customThemeColor');
+        const hexInput = document.getElementById('customThemeHex');
+        if (colorInput) colorInput.value = normalizedColor;
+        if (hexInput) hexInput.value = normalizedColor.toUpperCase();
+
+        settingsManager.setThemeColor(normalizedColor);
+
+        const settings = settingsManager.getSettings();
+        settings.primaryColor = normalizedColor;
+        settingsManager.saveSettings(settings);
+    }
+
+    syncPresetColorButtons(selectedColor) {
+        const selected = selectedColor ? this.normalizeHexColor(selectedColor) : null;
+        document.querySelectorAll('.color-btn').forEach(function(btn) {
+            const raw = btn.getAttribute('data-color') || '';
+            if (raw) btn.style.backgroundColor = raw;
+
+            if (!selected) {
+                btn.classList.remove('active');
+                return;
+            }
+
+            const normalizedBtnColor = raw ? (raw.startsWith('#') ? raw.toUpperCase() : ('#' + raw).toUpperCase()) : null;
+            btn.classList.toggle('active', normalizedBtnColor === selected);
+        });
+    }
+
+    normalizeHexColor(color) {
+        if (!color) return null;
+        let value = String(color).trim();
+        if (!value.startsWith('#')) value = '#' + value;
+        if (/^#[0-9a-fA-F]{3}$/.test(value)) {
+            value = '#' + value[1] + value[1] + value[2] + value[2] + value[3] + value[3];
+        }
+        return /^#[0-9a-fA-F]{6}$/.test(value) ? value.toUpperCase() : null;
+    }
+
+    // ============== STATISTICS PAGE ==============
+    initializeStatsPage() {
+        const filtered = appState.healthHistory.filter(function(item) {
+            const itemDate = new Date(item.date.split('/').reverse().join('-'));
+            const daysAgo = new Date();
+            daysAgo.setDate(daysAgo.getDate() - this.currentFilterDays);
+            return itemDate >= daysAgo;
+        }.bind(this));
+
+        if (filtered.length === 0) {
+            document.getElementById('detailedStats').innerHTML = '<p style="text-align: center; color: var(--text-secondary);">Không có dữ liệu</p>';
+            document.querySelectorAll('.stat-value').forEach(function(el) { el.textContent = '0'; });
+            return;
+        }
+
+        const avgScore = (filtered.reduce(function(a, b) { return a + b.score; }, 0) / filtered.length).toFixed(1);
+        const avgEnergy = (filtered.reduce(function(a, b) { return a + b.energy; }, 0) / filtered.length).toFixed(1);
+        const avgSleep = (filtered.reduce(function(a, b) { return a + b.sleep; }, 0) / filtered.length).toFixed(1);
+        const avgMood = (filtered.reduce(function(a, b) { return a + b.mood; }, 0) / filtered.length).toFixed(1);
+        const avgStress = (filtered.reduce(function(a, b) { return a + b.stress; }, 0) / filtered.length).toFixed(1);
+        const avgHunger = (filtered.reduce(function(a, b) { return a + b.hunger; }, 0) / filtered.length).toFixed(1);
 
         document.getElementById('avgScore').textContent = avgScore;
         document.getElementById('avgEnergy').textContent = avgEnergy;
@@ -1784,10 +2467,112 @@ class HealthChatApp {
         document.getElementById('avgHunger').textContent = avgHunger;
 
         const detailedStats = document.getElementById('detailedStats');
-        if (detailedStats) {
-            detailedStats.innerHTML = filtered.map(function(item) {
-                return '<div class="detailed-stat"><strong>' + item.date + ':</strong> Điểm ' + item.score + ' | Năng lượng ' + item.energy + ' | Giấc ngủ ' + item.sleep + '</div>';
+        detailedStats.innerHTML = filtered.map(function(item) {
+            return '<div class="detailed-stat"><strong>' + item.date + '</strong> - Điểm: <strong>' + item.score + '/100</strong></div>';
+        }).join('');
+    }
+
+    // ============== CHAT HISTORY ==============
+    startNewChat() {
+        chatHistoryManager.startNewSession();
+        this.goToPage('chat');
+        const chatMessages = document.getElementById('chatMessages');
+        if (chatMessages) {
+            chatMessages.innerHTML = '<div class="chat-bubble ai"><p>👋 Xin chào! Hôm nay bạn có chuyện gì muốn nói không?</p></div>';
+        }
+        this.updateHistoryList();
+    }
+
+    updateHistoryList() {
+        const historyList = document.getElementById('historyList');
+        if (!historyList) return;
+
+        const histories = chatHistoryManager.getAllHistories();
+        const currentSessionId = chatHistoryManager.getCurrentSessionId();
+
+        if (histories.length === 0) {
+            historyList.innerHTML = '<div class="chat-history-empty">Không có lịch sử</div>';
+            return;
+        }
+
+        const dayMs = 24 * 60 * 60 * 1000;
+        const now = new Date();
+        const todayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime();
+        const groups = {
+            today: [],
+            yesterday: [],
+            last7: [],
+            last30: [],
+            older: []
+        };
+
+        histories.forEach(function(session) {
+            const time = session.updatedAt || session.createdAt || Date.now();
+            const sessionDate = new Date(time);
+            const sessionStart = new Date(sessionDate.getFullYear(), sessionDate.getMonth(), sessionDate.getDate()).getTime();
+            const diffDays = Math.floor((todayStart - sessionStart) / dayMs);
+
+            if (diffDays <= 0) groups.today.push(session);
+            else if (diffDays === 1) groups.yesterday.push(session);
+            else if (diffDays <= 7) groups.last7.push(session);
+            else if (diffDays <= 30) groups.last30.push(session);
+            else groups.older.push(session);
+        });
+
+        const groupOrder = [
+            { key: 'today', label: 'Hôm nay' },
+            { key: 'yesterday', label: 'Hôm qua' },
+            { key: 'last7', label: '7 ngày trước' },
+            { key: 'last30', label: '30 ngày trước' },
+            { key: 'older', label: 'Cũ hơn' }
+        ];
+
+        historyList.innerHTML = groupOrder.map(function(group) {
+            const items = groups[group.key];
+            if (!items || items.length === 0) return '';
+
+            const htmlItems = items.map(function(session) {
+                const lastMessage = session.messages && session.messages.length > 0
+                    ? session.messages[session.messages.length - 1].text
+                    : '';
+                const preview = aiEngine.escapeHtml(lastMessage).substring(0, 45);
+                return '<div class="chat-history-item' + (session.id === currentSessionId ? ' active' : '') + '">' +
+                    '<button class="chat-history-title" onclick="app.loadChat(\'' + session.id + '\')">' + aiEngine.escapeHtml(session.title) + '</button>' +
+                    '<div class="chat-history-preview">' + preview + '</div>' +
+                    '<button class="chat-history-delete" onclick="app.deleteChat(\'' + session.id + '\')" title="Xóa cuộc trò chuyện">🗑️</button>' +
+                    '</div>';
             }).join('');
+
+            return '<div class="chat-history-group">' +
+                '<div class="chat-history-group-title">' + group.label + '</div>' +
+                htmlItems +
+                '</div>';
+        }).join('');
+    }
+
+    loadChat(sessionId) {
+        const session = chatHistoryManager.loadSession(sessionId);
+        if (session) {
+            this.goToPage('chat');
+            const chatMessages = document.getElementById('chatMessages');
+            if (chatMessages) {
+                chatMessages.innerHTML = session.messages.map(function(msg) {
+                    const bubbleClass = msg.isUser ? 'user' : 'ai';
+                    return '<div class="chat-bubble ' + bubbleClass + '"><p>' + msg.text + '</p></div>';
+                }).join('');
+                chatMessages.scrollTop = chatMessages.scrollHeight;
+            }
+            this.updateHistoryList();
+        }
+    }
+
+    deleteChat(sessionId) {
+        if (confirm('❌ Bạn chắc chắn muốn xóa cuộc trò chuyện này?')) {
+            chatHistoryManager.deleteSession(sessionId);
+            this.updateHistoryList();
+            if (sessionId === chatHistoryManager.getCurrentSessionId()) {
+                this.startNewChat();
+            }
         }
     }
 }
@@ -1801,7 +2586,12 @@ window.addEventListener('load', function() {
         const userEmailEl = document.getElementById('userEmail');
         if (userNameEl) userNameEl.textContent = appState.currentUser.name;
         if (userEmailEl) userEmailEl.textContent = appState.currentUser.email;
+        chatHistoryManager.loadHistories(appState.currentUser.email);
+        app.updateHistoryList();
         app.goToPage('chat');
+    } else {
+        app.setHistoryPanelVisible(false);
+        app.setAuthUIState(false);
     }
 });
 

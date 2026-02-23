@@ -1,4 +1,4 @@
-﻿<!DOCTYPE html>
+<!DOCTYPE html>
 <html lang="vi">
 <head>
     <meta charset="UTF-8">
@@ -10,6 +10,8 @@
     <!-- Sidebar Menu -->
     <div class="sidebar" id="sidebar">
         <button class="close-btn" id="closeSidebar">✕</button>
+
+        <!-- Menu Items -->
         <div class="menu-items">
             <button class="menu-item active" data-page="chat">💬 Trò Chuyện</button>
             <button class="menu-item" data-page="schedule">📅 Lịch Làm Việc</button>
@@ -20,6 +22,23 @@
 
     <!-- Overlay -->
     <div class="overlay" id="overlay"></div>
+
+    <!-- Main Chat History Panel -->
+    <aside class="chat-history-main" id="chatHistoryMain">
+        <div class="chat-history-section">
+            <div class="history-header">
+                <h3>Các đoạn chat của bạn</h3>
+                <div class="history-actions">
+                    <button class="history-collapse-btn" id="collapseHistoryBtn" title="Thu gọn">⟨</button>
+                    <button class="new-chat-btn" id="newChatBtn" title="Tạo đoạn chat mới">+</button>
+                </div>
+            </div>
+            <div class="history-list" id="historyList">
+                <!-- Lịch sử sẽ được thêm vào đây -->
+            </div>
+        </div>
+    </aside>
+    <button class="history-expand-btn" id="expandHistoryBtn" title="Mở lịch sử chat">⟩</button>
 
     <!-- Avatar Crop Modal -->
     <div class="avatar-crop-modal" id="avatarCropModal">
@@ -152,9 +171,9 @@
                             </div>
                             <button type="submit" class="btn btn-primary">Đăng Nhập</button>
                         </form>
-                        <p>Chưa có tài khoản? <button class="link-btn" id="switchToSignup">Đăng Ký Ngay</button></p>
+                        <p>Chưa có tài khoản? <button type="button" class="link-btn" id="switchToSignup">Đăng Ký Ngay</button></p>
                         <p style="margin-top: 10px;">
-                            <button class="link-btn" id="forgotPasswordLink">Quên Mật Khẩu?</button>
+                            <button type="button" class="link-btn" id="forgotPasswordLink">Quên Mật Khẩu?</button>
                         </p>
                     </div>
                 </div>
@@ -184,7 +203,7 @@
                             </div>
                             <button type="submit" class="btn btn-primary">Đăng Ký</button>
                         </form>
-                        <p>Đã có tài khoản? <button class="link-btn" id="switchToLogin">Đăng Nhập</button></p>
+                        <p>Đã có tài khoản? <button type="button" class="link-btn" id="switchToLogin">Đăng Nhập</button></p>
                         <div class="success-message" id="signupSuccess" style="display: none;">
                             ✅ Đăng ký thành công! Hãy đăng nhập để tiếp tục.
                         </div>
@@ -211,6 +230,10 @@
                         <input type="text" id="mainChatInput" placeholder="Hỏi tôi bất cứ điều gì...">
                         <button class="send-btn" id="mainSendBtn">➤</button>
                     </div>
+                    <p class="chat-disclaimer">
+                        BẠN CÓ THỂ SANG TRANG WED NÀY ĐỂ THÔNG TIN ĐƯỢC CHÍNH XÁC HƠN:
+                        <a href="https://chatgpt.com/g/g-67657a1bfffc819190a59d65f229376d-rightcare-tu-van-suc-khoe" target="_blank" rel="noopener noreferrer">RIGHTCARE</a>
+                    </p>
                     <div class="loading" id="loadingIndicator" style="display: none;">
                         <span></span><span></span><span></span>
                     </div>
@@ -287,7 +310,7 @@
             <!-- Help Page -->
             <section id="helpPage" class="page">
                 <div class="help-container">
-                    <h2>🆘 Trung Tâm Hỗ Tr���</h2>
+                    <h2>🆘 Trung Tâm Hỗ Trợ</h2>
                     <div class="help-chat-container">
                         <div class="help-messages" id="helpMessages">
                             <div class="chat-bubble ai">
@@ -320,7 +343,7 @@
                             <div class="avatar-selector">
                                 <img src="https://i.pravatar.cc/150?img=1" alt="Avatar" class="avatar-preview" id="settingsAvatarImg">
                                 <div class="avatar-options">
-                                    <button class="btn btn-primary" id="uploadAvatarBtn">📁 Chọn ảnh từ máy</button>
+                                    <button type="button" class="btn btn-primary" id="uploadAvatarBtn">📁 Chọn ảnh từ máy</button>
                                     <input type="file" id="avatarFileInput" accept="image/*" style="display: none;">
                                 </div>
                             </div>
@@ -337,7 +360,7 @@
                                 <label>Email</label>
                                 <input type="email" id="settingsEmail" placeholder="Nhập email">
                             </div>
-                            <button class="btn btn-primary" id="updateProfileBtn">Cập Nhật Thông Tin</button>
+                            <button type="button" class="btn btn-primary" id="updateProfileBtn">Cập Nhật Thông Tin</button>
                         </div>
 
                         <!-- Theme Section -->
@@ -356,12 +379,17 @@
                             <div class="color-selector">
                                 <label>Chọn Màu Chủ Đề:</label>
                                 <div class="color-options">
-                                    <button class="color-btn" data-color="#4CAF50" title="Xanh lá"></button>
-                                    <button class="color-btn" data-color="#2196F3" title="Xanh dương"></button>
-                                    <button class="color-btn" data-color="#FF9800" title="Cam"></button>
-                                    <button class="color-btn" data-color="#E91E63" title="Hồng"></button>
-                                    <button class="color-btn" data-color="#9C27B0" title="Tím"></button>
-                                    <button class="color-btn" data-color="#00BCD4" title="Cyan"></button>
+                                    <button type="button" class="color-btn" data-color="#4CAF50" title="Xanh lá"></button>
+                                    <button type="button" class="color-btn" data-color="#2196F3" title="Xanh dương"></button>
+                                    <button type="button" class="color-btn" data-color="#FF9800" title="Cam"></button>
+                                    <button type="button" class="color-btn" data-color="#E91E63" title="Hồng"></button>
+                                    <button type="button" class="color-btn" data-color="#9C27B0" title="Tím"></button>
+                                    <button type="button" class="color-btn" data-color="#00BCD4" title="Cyan"></button>
+                                </div>
+                                <div class="custom-color-row">
+                                    <input type="color" id="customThemeColor" value="#4caf50" title="Chọn màu bất kỳ">
+                                    <input type="text" id="customThemeHex" value="#4CAF50" maxlength="7" placeholder="#RRGGBB">
+                                    <button type="button" class="btn btn-secondary btn-apply-color" id="applyCustomColorBtn">Áp Dụng</button>
                                 </div>
                             </div>
                         </div>
@@ -381,7 +409,7 @@
                                 <label>Xác Nhận Mật Khẩu</label>
                                 <input type="password" id="confirmPassword" placeholder="Xác nhận mật khẩu mới">
                             </div>
-                            <button class="btn btn-primary" id="updatePasswordBtn">Cập Nhật Mật Khẩu</button>
+                            <button type="button" class="btn btn-primary" id="updatePasswordBtn">Cập Nhật Mật Khẩu</button>
                         </div>
                     </div>
                 </div>
@@ -401,8 +429,8 @@
                             <p style="color: var(--text-secondary); margin-bottom: 15px;">
                                 Mã PIN giúp bạn khôi phục mật khẩu nếu quên. Mỗi mã chỉ được sử dụng một lần.
                             </p>
-                            <button class="btn btn-primary" id="generatePinBtn">Tạo Mã PIN Mới</button>
-                            <button class="btn btn-secondary" id="viewPinBtn" style="margin-top: 10px;">👁️ Xem Mã PIN</button>
+                            <button type="button" class="btn btn-primary" id="generatePinBtn">Tạo Mã PIN Mới</button>
+                            <button type="button" class="btn btn-secondary" id="viewPinBtn" style="margin-top: 10px;">👁️ Xem Mã PIN</button>
                             <div id="pinStatus" style="margin-top: 15px; color: var(--text-secondary); font-size: 14px;"></div>
                         </div>
                     </div>
@@ -418,11 +446,11 @@
                     </div>
 
                     <div class="time-filter">
-                        <button class="filter-btn active" data-days="1">1 Ngày</button>
-                        <button class="filter-btn" data-days="3">3 Ngày</button>
-                        <button class="filter-btn" data-days="7">7 Ngày</button>
-                        <button class="filter-btn" data-days="30">1 Tháng</button>
-                        <button class="filter-btn" data-days="365">1 Năm</button>
+                        <button type="button" class="filter-btn active" data-days="1">1 Ngày</button>
+                        <button type="button" class="filter-btn" data-days="3">3 Ngày</button>
+                        <button type="button" class="filter-btn" data-days="7">7 Ngày</button>
+                        <button type="button" class="filter-btn" data-days="30">1 Tháng</button>
+                        <button type="button" class="filter-btn" data-days="365">1 Năm</button>
                     </div>
 
                     <div class="stats-content">
@@ -465,6 +493,12 @@
             </section>
         </main>
     </div>
+
+    <!-- Scripts -->
+    <script src="https://www.gstatic.com/firebasejs/10.5.0/firebase-app.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/10.5.0/firebase-auth.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/10.5.0/firebase-firestore.js"></script>
+    
     <script src="styles.js"></script>
 </body>
 </html>
