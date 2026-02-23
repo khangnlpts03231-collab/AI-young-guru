@@ -316,6 +316,8 @@ class AppState {
 }
 
 const appState = new AppState();
+const DEFAULT_AVATAR_DATA =
+    "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='150' height='150' viewBox='0 0 150 150'%3E%3Crect width='150' height='150' fill='%23bdbdbd'/%3E%3Ccircle cx='75' cy='48' r='30' fill='%23f2f2f2'/%3E%3Cpath d='M20 150a55 55 0 0 1 110 0Z' fill='%23f2f2f2'/%3E%3C/svg%3E";
 
 // ============== SETTINGS MANAGER ==============
 class SettingsManager {
@@ -323,28 +325,72 @@ class SettingsManager {
         this.loadSettings();
     }
 
+    getSettingsKey() {
+        const userEmail = appState.currentUser && appState.currentUser.email
+            ? appState.currentUser.email.trim().toLowerCase()
+            : '';
+        return userEmail ? 'userSettings_' + userEmail : 'userSettings_guest';
+    }
+
+    getLegacySettings() {
+        const legacy = localStorage.getItem('userSettings');
+        if (!legacy) return null;
+
+        try {
+            return JSON.parse(legacy);
+        } catch (e) {
+            return null;
+        }
+    }
+
     loadSettings() {
-        const saved = localStorage.getItem('userSettings');
+        const settingsKey = this.getSettingsKey();
+        let settings = {};
+        const saved = localStorage.getItem(settingsKey);
+
         if (saved) {
-            const settings = JSON.parse(saved);
-            if (settings.theme === 'dark') {
-                document.body.classList.add('dark-mode');
+            try {
+                settings = JSON.parse(saved) || {};
+            } catch (e) {
+                settings = {};
             }
-            if (settings.primaryColor) {
-                this.setThemeColor(settings.primaryColor);
+        } else {
+            const legacySettings = this.getLegacySettings();
+            if (legacySettings) {
+                settings = legacySettings;
+                localStorage.setItem(settingsKey, JSON.stringify(settings));
             }
-            if (settings.avatar) {
-                this.updateAvatarDisplay(settings.avatar);
-            }
+        }
+
+        if (settings.theme === 'dark') {
+            document.body.classList.add('dark-mode');
+        } else {
+            document.body.classList.remove('dark-mode');
+        }
+
+        if (settings.primaryColor) {
+            this.setThemeColor(settings.primaryColor);
+        }
+
+        if (settings.avatar) {
+            this.updateAvatarDisplay(settings.avatar);
+        } else {
+            this.updateAvatarDisplay(DEFAULT_AVATAR_DATA);
         }
     }
 
     saveSettings(settings) {
-        localStorage.setItem('userSettings', JSON.stringify(settings));
+        localStorage.setItem(this.getSettingsKey(), JSON.stringify(settings));
     }
 
     getSettings() {
-        return JSON.parse(localStorage.getItem('userSettings') || '{}');
+        const saved = localStorage.getItem(this.getSettingsKey());
+        if (!saved) return {};
+        try {
+            return JSON.parse(saved) || {};
+        } catch (e) {
+            return {};
+        }
     }
 
     setThemeColor(color) {
@@ -1693,6 +1739,7 @@ class HealthChatApp {
             appState.currentUser = user;
             appState.isAuthenticated = true;
             appState.saveToLocalStorage();
+            settingsManager.loadSettings();
             pinManager.loadPins(user.email);
             chatHistoryManager.loadHistories(user.email);
             this.updateHistoryList();
@@ -1760,6 +1807,7 @@ class HealthChatApp {
         appState.isAuthenticated = false;
         appState.currentUser = null;
         localStorage.removeItem('currentUser');
+        settingsManager.loadSettings();
         chatHistoryManager.loadHistories(null);
         this.updateHistoryList();
         this.setAuthUIState(false);
