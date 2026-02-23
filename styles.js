@@ -1967,6 +1967,7 @@ class HealthChatApp {
     normalizeText(text) {
         return (text || '')
             .toLowerCase()
+            .replace(/[đĐ]/g, 'd')
             .normalize('NFD')
             .replace(/[\u0300-\u036f]/g, '');
     }
@@ -1984,7 +1985,12 @@ class HealthChatApp {
         const shouldSave = saveKeywords.some(function(k) {
             return normalized.includes(k);
         });
-        if (!shouldSave) return null;
+        const hasHealthAndSaveIntent =
+            normalized.includes('suc khoe') &&
+            (normalized.includes('luu') || normalized.includes('danh gia') || normalized.includes('cham diem'));
+
+        const shouldAutoSave = shouldSave || hasHealthAndSaveIntent;
+        if (!shouldAutoSave) return null;
 
         const numbers = (normalized.match(/\b\d{1,3}\b/g) || []).map(function(n) {
             return parseInt(n, 10);
