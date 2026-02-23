@@ -1931,7 +1931,7 @@ class HealthChatApp {
         const message = input.value.trim();
 
         if (message) {
-            const autoHealth = this.tryAutoSaveHealthFromMessage(message);
+            const healthDraftResult = this.tryPrepareHealthDraftFromMessage(message);
             chatHistoryManager.addMessage(message, true);
             this.updateHistoryList();
             const chatMessages = document.getElementById('chatMessages');
@@ -1949,7 +1949,7 @@ class HealthChatApp {
             setTimeout(function() {
                 if (loading) loading.style.display = 'none';
                 
-                const aiResponse = autoHealth ? autoHealth.reply : aiEngine.generateResponse(message);
+                const aiResponse = healthDraftResult ? healthDraftResult.reply : aiEngine.generateResponse(message);
                 chatHistoryManager.addMessage(aiResponse, false);
                 app.updateHistoryList();
                 
@@ -1972,7 +1972,7 @@ class HealthChatApp {
             .replace(/[\u0300-\u036f]/g, '');
     }
 
-    tryAutoSaveHealthFromMessage(message) {
+    tryPrepareHealthDraftFromMessage(message) {
         const normalized = this.normalizeText(message);
         const saveKeywords = [
             'danh gia suc khoe',
@@ -1992,60 +1992,104 @@ class HealthChatApp {
         const shouldAutoSave = shouldSave || hasHealthAndSaveIntent;
         if (!shouldAutoSave) return null;
 
-        const numbers = (normalized.match(/\b\d{1,3}\b/g) || []).map(function(n) {
-            return parseInt(n, 10);
-        }).filter(function(n) {
-            return !isNaN(n) && n >= 0 && n <= 100;
+        const draft = this.buildHealthDraftFromMessage(normalized);
+        this.applyHealthDraftToForm(draft);
+        this.goToPage('health');
+
+        return {
+            prepared: true,
+            reply: '📝 Mình đã mở trang <strong>Đánh Giá Sức Khỏe</strong> và điền sẵn nháp cho bạn.\n' +
+                '💪 Năng lượng ' + draft.energy + '/10, 😴 Giấc ngủ ' + draft.sleep + '/10, 😊 Tâm trạng ' + draft.mood + '/10, 😰 Stress ' + draft.stress + '/10, 🍽️ Cơn đói ' + draft.hunger + '/10.\n' +
+                '👉 Bạn kéo chỉnh từng mục rồi bấm <strong>Lưu Đánh Giá</strong> để lưu chính thức.'
+        };
+    }
+
+    buildHealthDraftFromMessage(normalizedMessage) {
+        const normalized = this.normalizeText(normalizedMessage);
+
+        const clamp10 = function(value, fallback) {
+            const n = parseInt(value, 10);
+            if (isNaN(n)) return fallback;
+            return Math.max(1, Math.min(10, n));
+        };
+
+        const findMetric = function(aliases) {
+            for (let i = 0; i < aliases.length; i++) {
+                const alias = aliases[i];
+                const afterPattern = new RegExp(alias + '\\s*(?:la|:|=)?\\s*(\\d{1,2})', 'i');
+                const afterMatch = normalized.match(afterPattern);
+                if (afterMatch && afterMatch[1]) return clamp10(afterMatch[1], null);
+
+                const beforePattern = new RegExp('(\\d{1,2})\\s*' + alias, 'i');
+                const beforeMatch = normalized.match(beforePattern);
+                if (beforeMatch && beforeMatch[1]) return clamp10(beforeMatch[1], null);
+            }
+            return null;
+        };
+
+        let base = 7;
+        const scoreMatch = normalized.match(/(\d{1,3})\s*\/\s*100/);
+        if (scoreMatch && scoreMatch[1]) {
+            base = clamp10(Math.round(Math.max(0, Math.min(100, parseInt(scoreMatch[1], 10))) / 10), 7);
+        } else {
+            const genericNumbers = (normalized.match(/\b\d{1,2}\b/g) || []).map(function(n) {
+                return parseInt(n, 10);
+            }).filter(function(n) {
+                return !isNaN(n) && n >= 1 && n <= 10;
+            });
+            if (genericNumbers.length === 5) {
+                return {
+                    energy: genericNumbers[0],
+                    sleep: genericNumbers[1],
+                    mood: genericNumbers[2],
+                    stress: genericNumbers[3],
+                    hunger: genericNumbers[4]
+                };
+            }
+            if (genericNumbers.length > 0) {
+                base = clamp10(genericNumbers[genericNumbers.length - 1], 7);
+            }
+        }
+
+        const allMatch = normalized.match(/tat ca (?:deu|la)\s*(\d{1,2})/);
+        if (allMatch && allMatch[1]) {
+            base = clamp10(allMatch[1], base);
+        }
+
+        return {
+            energy: findMetric(['nang luong']) || base,
+            sleep: findMetric(['giac ngu', 'ngu']) || base,
+            mood: findMetric(['tam trang', 'cam xuc']) || base,
+            stress: findMetric(['stress', 'cang thang', 'lo lang']) || base,
+            hunger: findMetric(['con doi', 'doi']) || base
+        };
+    }
+
+    applyHealthDraftToForm(draft) {
+        const mapping = [
+            ['energyLevel', 'energyDisplay', draft.energy],
+            ['sleepQuality', 'sleepDisplay', draft.sleep],
+            ['mood', 'moodDisplay', draft.mood],
+            ['stress', 'stressDisplay', draft.stress],
+            ['hunger', 'hungerDisplay', draft.hunger]
+        ];
+
+        mapping.forEach(function(item) {
+            const input = document.getElementById(item[0]);
+            const display = document.getElementById(item[1]);
+            if (input) input.value = item[2];
+            if (display) display.textContent = item[2];
         });
 
-        const targetScore = numbers.length > 0 ? numbers[numbers.length - 1] : 70;
-        const assessment = this.buildAutoHealthAssessment(targetScore);
-        this.applySavedHealthAssessment(assessment);
-
-        return {
-            saved: true,
-            reply: '✅ Mình đã tự lưu đánh giá sức khỏe cho bạn: <strong>' + assessment.score + '/100</strong>.\n' +
-                '💪 Năng lượng ' + assessment.energy + '/10, 😴 Giấc ngủ ' + assessment.sleep + '/10, 😊 Tâm trạng ' + assessment.mood + '/10, 😰 Stress ' + assessment.stress + '/10, 🍽️ Cơn đói ' + assessment.hunger + '/10.'
-        };
-    }
-
-    buildAutoHealthAssessment(targetScore) {
-        const safeScore = Math.max(0, Math.min(100, targetScore));
-        const level = Math.max(1, Math.min(10, Math.round(safeScore / 10)));
-
-        const requiredX = Math.round((safeScore / 10) * 5 - (level * 4));
-        const x = Math.max(0, Math.min(10, requiredX)); // x = (10 - stress)
-        const stress = Math.max(0, Math.min(10, 10 - x));
-        const finalScore = Math.round(((level + level + level + (10 - stress) + level) / 5) * 10);
-
-        return {
-            date: new Date().toLocaleDateString('vi-VN'),
-            time: new Date().toLocaleTimeString('vi-VN'),
-            energy: level,
-            sleep: level,
-            mood: level,
-            stress: stress,
-            hunger: level,
-            score: finalScore
-        };
-    }
-
-    applySavedHealthAssessment(assessment) {
-        appState.healthHistory.push(assessment);
-        appState.saveToLocalStorage();
+        const draftScore = Math.round(((draft.energy + draft.sleep + draft.mood + (10 - draft.stress) + draft.hunger) / 5) * 10);
 
         const scoreEl = document.getElementById('wellBeingScore');
-        if (scoreEl) scoreEl.textContent = assessment.score;
+        if (scoreEl) scoreEl.textContent = draftScore;
 
         const statusEl = document.getElementById('scoreStatus');
         if (statusEl) {
-            let status = '😊 Tuyệt vời!';
-            if (assessment.score < 50) status = '😔 Cần cải thiện';
-            else if (assessment.score < 70) status = '😐 Bình thường';
-            statusEl.textContent = status + ' (' + assessment.score + '/100)';
+            statusEl.textContent = '📝 Điểm nháp: ' + draftScore + '/100 (hãy chỉnh và bấm Lưu Đánh Giá)';
         }
-
-        this.updateHealthHistory();
     }
 
     sendHelpMessage() {
