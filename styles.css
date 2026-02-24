@@ -1,4 +1,4 @@
-* {
+﻿* {
     margin: 0;
     padding: 0;
     box-sizing: border-box;
@@ -1990,11 +1990,14 @@ body.unauthenticated .header h1 {
     }
 
     .chat-history-main {
-        display: none !important;
+        display: block !important;
+        width: min(88vw, 320px);
+        transform: translateX(-100%);
+        z-index: 1200;
     }
 
-    .history-expand-btn {
-        display: none !important;
+    body.history-panel-visible .chat-history-main {
+        transform: translateX(0);
     }
 
     body.history-panel-visible .container {
@@ -2084,3 +2087,4 @@ body.unauthenticated .header h1 {
 ::-webkit-scrollbar-thumb:hover {
     background: var(--primary-dark);
 }
+

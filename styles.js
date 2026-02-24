@@ -1346,7 +1346,10 @@ class HealthChatApp {
         this.currentFilterDays = 1;
         this.resetPasswordEmail = null;
         this.timerInterval = null;
-        this.historyPanelCollapsed = localStorage.getItem('historyPanelCollapsed') === '1';
+        const savedHistoryPanelState = localStorage.getItem('historyPanelCollapsed');
+        this.historyPanelCollapsed = savedHistoryPanelState === null
+            ? window.matchMedia('(max-width: 768px)').matches
+            : savedHistoryPanelState === '1';
         this.initializeEventListeners();
         
         if (appState.isAuthenticated) {
@@ -2815,6 +2818,7 @@ window.addEventListener('beforeunload', function() {
         clearInterval(app.timerInterval);
     }
 });
+
 
 
 
