@@ -676,6 +676,23 @@ body.unauthenticated .header h1 {
     margin: 20px;
 }
 
+#signupPage .auth-container {
+    background:
+        radial-gradient(circle at 20% 20%, rgba(57, 255, 20, 0.16) 0%, rgba(57, 255, 20, 0) 45%),
+        radial-gradient(circle at 80% 75%, rgba(57, 255, 20, 0.12) 0%, rgba(57, 255, 20, 0) 42%),
+        linear-gradient(135deg, #f7fff8 0%, #f1fff4 100%);
+}
+
+#signupPage .auth-content {
+    background: #ffffff;
+    border: 1px solid rgba(57, 255, 20, 0.35);
+    box-shadow: 0 0 0 2px rgba(57, 255, 20, 0.12), 0 18px 40px rgba(20, 200, 80, 0.18);
+}
+
+#signupPage .auth-content h2 {
+    color: #16a34a;
+}
+
 .auth-content h2 {
     margin-bottom: 30px;
     color: var(--primary-color);

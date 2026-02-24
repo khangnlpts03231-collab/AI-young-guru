@@ -232,8 +232,9 @@ body {
 /* ── MAIN ── */
 .main {
   padding: 20px;
-  max-width: 700px;
+  max-width: 1180px;
   margin: 0 auto;
+  width: 100%;
 }
 
 /* Add event btn */
@@ -426,7 +427,7 @@ body {
   display: none;
   background: white;
   border-radius: var(--radius);
-  overflow: hidden;
+  overflow: auto;
   box-shadow: var(--shadow);
 }
 
@@ -436,6 +437,7 @@ body {
   display: grid;
   grid-template-columns: 60px repeat(7, 1fr);
   border-bottom: 1px solid var(--border);
+  min-width: 860px;
 }
 
 .wgh-cell {
@@ -459,6 +461,7 @@ body {
   grid-template-columns: 60px repeat(7, 1fr);
   border-bottom: 1px solid var(--border);
   min-height: 50px;
+  min-width: 860px;
 }
 
 .wtr-time {
@@ -733,11 +736,59 @@ body {
 }
 
 /* ── RESPONSIVE ── */
+@media (min-width: 1024px) {
+  .header {
+    padding: 28px 34px 24px;
+  }
+
+  .header-title {
+    font-size: 32px;
+  }
+
+  .header-label {
+    font-size: 12px;
+  }
+
+  .main {
+    padding: 26px;
+  }
+}
+
 @media (max-width: 520px) {
   .main { padding: 14px; }
   .form-row { grid-template-columns: 1fr; }
   .header { padding: 18px 16px 16px; }
   .day-tab { min-width: 54px; padding: 12px 8px; }
+  .header-top {
+    flex-direction: column;
+    gap: 10px;
+  }
+  .header-today {
+    text-align: left;
+  }
+  .week-nav {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 10px;
+  }
+  .week-btns {
+    width: 100%;
+    justify-content: space-between;
+  }
+  .day-tabs {
+    padding: 0 8px;
+  }
+  .event-card {
+    padding: 14px 12px;
+    gap: 10px;
+  }
+  .event-time-col {
+    min-width: 60px;
+  }
+  .event-actions {
+    opacity: 1;
+    flex-direction: row;
+  }
 }
 </style>
 </head>
