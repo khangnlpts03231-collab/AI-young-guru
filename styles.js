@@ -2657,6 +2657,47 @@ class HealthChatApp {
 
     // ============== STATISTICS PAGE ==============
     initializeStatsPage() {
+        const allHistory = appState.healthHistory || [];
+
+        const score10FromItem = function(item) {
+            if (typeof item.score === 'number' && isFinite(item.score)) {
+                return Math.max(0, Math.min(10, item.score / 10));
+            }
+
+            const energy = Number(item.energy) || 0;
+            const sleep = Number(item.sleep) || 0;
+            const mood = Number(item.mood) || 0;
+            const stress = Number(item.stress) || 0;
+            const hunger = Number(item.hunger) || 0;
+            return Math.max(0, Math.min(10, (energy + sleep + mood + (10 - stress) + hunger) / 5));
+        };
+
+        const avgScoreEl = document.getElementById('avgScore');
+        if (allHistory.length === 0) {
+            if (avgScoreEl) avgScoreEl.textContent = '--/10';
+            document.getElementById('avgEnergy').textContent = '0';
+            document.getElementById('avgSleep').textContent = '0';
+            document.getElementById('avgMood').textContent = '0';
+            document.getElementById('avgStress').textContent = '0';
+            document.getElementById('avgHunger').textContent = '0';
+            document.getElementById('detailedStats').innerHTML = '<p style="text-align: center; color: var(--text-secondary);">Không có dữ liệu</p>';
+            return;
+        }
+
+        // Điểm sức khỏe trung bình: gom toàn bộ đánh giá theo ngày, lấy TB từng ngày rồi TB toàn bộ ngày.
+        const groupedByDate = {};
+        allHistory.forEach(function(item) {
+            const key = item.date || 'Không rõ ngày';
+            if (!groupedByDate[key]) groupedByDate[key] = [];
+            groupedByDate[key].push(score10FromItem(item));
+        });
+        const dailyAverages = Object.keys(groupedByDate).map(function(day) {
+            const values = groupedByDate[day];
+            return values.reduce(function(sum, value) { return sum + value; }, 0) / values.length;
+        });
+        const avgScore = (dailyAverages.reduce(function(sum, value) { return sum + value; }, 0) / dailyAverages.length).toFixed(1);
+        if (avgScoreEl) avgScoreEl.textContent = avgScore + '/10';
+
         const filtered = appState.healthHistory.filter(function(item) {
             const itemDate = new Date(item.date.split('/').reverse().join('-'));
             const daysAgo = new Date();
@@ -2666,18 +2707,20 @@ class HealthChatApp {
 
         if (filtered.length === 0) {
             document.getElementById('detailedStats').innerHTML = '<p style="text-align: center; color: var(--text-secondary);">Không có dữ liệu</p>';
-            document.querySelectorAll('.stat-value').forEach(function(el) { el.textContent = '0'; });
+            document.getElementById('avgEnergy').textContent = '0';
+            document.getElementById('avgSleep').textContent = '0';
+            document.getElementById('avgMood').textContent = '0';
+            document.getElementById('avgStress').textContent = '0';
+            document.getElementById('avgHunger').textContent = '0';
             return;
         }
 
-        const avgScore = (filtered.reduce(function(a, b) { return a + b.score; }, 0) / filtered.length).toFixed(1);
         const avgEnergy = (filtered.reduce(function(a, b) { return a + b.energy; }, 0) / filtered.length).toFixed(1);
         const avgSleep = (filtered.reduce(function(a, b) { return a + b.sleep; }, 0) / filtered.length).toFixed(1);
         const avgMood = (filtered.reduce(function(a, b) { return a + b.mood; }, 0) / filtered.length).toFixed(1);
         const avgStress = (filtered.reduce(function(a, b) { return a + b.stress; }, 0) / filtered.length).toFixed(1);
         const avgHunger = (filtered.reduce(function(a, b) { return a + b.hunger; }, 0) / filtered.length).toFixed(1);
 
-        document.getElementById('avgScore').textContent = avgScore;
         document.getElementById('avgEnergy').textContent = avgEnergy;
         document.getElementById('avgSleep').textContent = avgSleep;
         document.getElementById('avgMood').textContent = avgMood;
@@ -2686,7 +2729,7 @@ class HealthChatApp {
 
         const detailedStats = document.getElementById('detailedStats');
         detailedStats.innerHTML = filtered.map(function(item) {
-            return '<div class="detailed-stat"><strong>' + item.date + '</strong> - Điểm: <strong>' + item.score + '/100</strong></div>';
+            return '<div class="detailed-stat"><strong>' + item.date + '</strong> - Điểm: <strong>' + score10FromItem(item).toFixed(1) + '/10</strong></div>';
         }).join('');
     }
 

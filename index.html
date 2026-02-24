@@ -14,7 +14,7 @@
         <!-- Menu Items -->
         <div class="menu-items">
             <button class="menu-item active" data-page="chat">💬 Trò Chuyện</button>
-            <button class="menu-item" data-page="schedule">📅 Lịch Làm Việc</button>
+            <button class="menu-item" data-page="schedule">📅 Thời Khóa Biểu</button>
             <button class="menu-item" data-page="health">❤️ Đánh Giá Sức Khỏe</button>
             <button class="menu-item" data-page="help">🆘 Giúp Đỡ</button>
         </div>
@@ -243,8 +243,12 @@
             <!-- Schedule Page -->
             <section id="schedulePage" class="page">
                 <div class="schedule-container">
-                    <h2>📅 Lịch Làm Việc & Ăn Uống Hôm Nay</h2>
-                    <div class="schedule-content" id="scheduleContent"></div>
+                    <iframe
+                        class="schedule-iframe"
+                        src="thoikhoabieu.html"
+                        title="Thời khóa biểu"
+                        loading="lazy"
+                    ></iframe>
                 </div>
             </section>
 
@@ -455,8 +459,8 @@
 
                     <div class="stats-content">
                         <div class="stat-card">
-                            <h3>📈 Điểm Sức Khỏe Trung Bình</h3>
-                            <div class="stat-value" id="avgScore">0</div>
+                            <h3>📈 Điểm Sức Khỏe Trung Bình (/10)</h3>
+                            <div class="stat-value" id="avgScore">--/10</div>
                         </div>
 
                         <div class="stat-card">
