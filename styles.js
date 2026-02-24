@@ -441,7 +441,10 @@ class AIEngine {
         const isLocal = window.location.protocol === 'file:' ||
             window.location.hostname === 'localhost' ||
             window.location.hostname === '127.0.0.1';
-        this.chatApiEndpoint = configuredEndpoint || (isLocal ? 'http://localhost:3000/api/chat' : '/api/chat');
+        this.chatApiEndpoint = configuredEndpoint ||
+            (isLocal
+                ? 'http://localhost:3000/api/chat'
+                : 'https://healthchat-server.onrender.com/api/chat');
     }
 
     generateResponse(message) {
