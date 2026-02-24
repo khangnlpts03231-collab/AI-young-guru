@@ -435,8 +435,13 @@ class AIEngine {
         this.conversationContext = [];
         this.conversationHistory = [];
         this.rightCareUrl = 'https://chatgpt.com/g/g-67657a1bfffc819190a59d65f229376d-rightcare-tu-van-suc-khoe';
-        this.deepSeekApiKey = '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';
-        this.deepSeekModel = 'deepseek/deepseek-chat';
+        const configuredEndpoint = typeof window.CHAT_API_ENDPOINT === 'string'
+            ? window.CHAT_API_ENDPOINT.trim()
+            : '';
+        const isLocal = window.location.protocol === 'file:' ||
+            window.location.hostname === 'localhost' ||
+            window.location.hostname === '127.0.0.1';
+        this.chatApiEndpoint = configuredEndpoint || (isLocal ? 'http://localhost:3000/api/chat' : '/api/chat');
     }
 
     generateResponse(message) {
@@ -526,24 +531,17 @@ class AIEngine {
     }
 
     async getDeepSeekResponse(message) {
-        if (!this.deepSeekApiKey) return null;
-
-        const endpoint = 'https://openrouter.ai/api/v1/chat/completions';
         for (let attempt = 0; attempt < 2; attempt++) {
             const controller = new AbortController();
             const timeoutId = setTimeout(function() { controller.abort(); }, 20000);
 
             try {
-                const response = await fetch(endpoint, {
+                const response = await fetch(this.chatApiEndpoint, {
                     method: 'POST',
                     headers: {
-                        'Authorization': 'Bearer ' + this.deepSeekApiKey,
-                        'HTTP-Referer': window.location.origin,
-                        'X-Title': 'HealthChat',
                         'Content-Type': 'application/json'
                     },
                     body: JSON.stringify({
-                        model: this.deepSeekModel,
                         messages: [
                             {
                                 role: 'system',
@@ -582,10 +580,11 @@ class AIEngine {
                     continue;
                 }
 
-                console.warn('DeepSeek API error:', response.status, data);
+                const errorDetails = data && data.details ? data.details : data;
+                console.warn('Chat backend error:', response.status, errorDetails);
                 return null;
             } catch (error) {
-                console.warn('DeepSeek request failed:', error);
+                console.warn('DeepSeek request failed:', error, 'Backend co the chua chay. Hay chay chatbot-server o cong 3000.');
                 return null;
             } finally {
                 clearTimeout(timeoutId);
@@ -2813,7 +2812,6 @@ window.addEventListener('beforeunload', function() {
         clearInterval(app.timerInterval);
     }
 });
-
 
 
 
