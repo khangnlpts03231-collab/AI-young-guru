@@ -1,4 +1,4 @@
-// ============== PIN MANAGER ==============
+﻿// ============== PIN MANAGER ==============
 class PinManager {
     constructor() {
         this.pins = [];
@@ -178,7 +178,7 @@ class ChatHistoryManager {
     }
 
     generateTitle(message) {
-        const maxLength = 50;
+        const maxLength = 150;
         if (message.length > maxLength) {
             return message.substring(0, maxLength) + '...';
         }
@@ -435,6 +435,8 @@ class AIEngine {
         this.conversationContext = [];
         this.conversationHistory = [];
         this.rightCareUrl = 'https://chatgpt.com/g/g-67657a1bfffc819190a59d65f229376d-rightcare-tu-van-suc-khoe';
+        this.deepSeekApiKey = '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';
+        this.deepSeekModel = 'deepseek/deepseek-chat';
     }
 
     generateResponse(message) {
@@ -500,6 +502,97 @@ class AIEngine {
         }
 
         return this.handleGeneralQuestion(lowerMessage, message);
+    }
+
+    async generateResponseAsync(message) {
+        const lowerMessage = message.toLowerCase().trim();
+
+        if (this.isHealthWebsiteRequest(lowerMessage)) {
+            return this.handleHealthWebsiteRequest();
+        }
+
+        const apiReply = await this.getDeepSeekResponse(message);
+        if (apiReply) {
+            return this.escapeHtml(apiReply).replace(/\n/g, '<br>') + this.getRightCareSuggestion();
+        }
+
+        return this.generateResponse(message);
+    }
+
+    sleep(ms) {
+        return new Promise(function(resolve) {
+            setTimeout(resolve, ms);
+        });
+    }
+
+    async getDeepSeekResponse(message) {
+        if (!this.deepSeekApiKey) return null;
+
+        const endpoint = 'https://openrouter.ai/api/v1/chat/completions';
+        for (let attempt = 0; attempt < 2; attempt++) {
+            const controller = new AbortController();
+            const timeoutId = setTimeout(function() { controller.abort(); }, 20000);
+
+            try {
+                const response = await fetch(endpoint, {
+                    method: 'POST',
+                    headers: {
+                        'Authorization': 'Bearer ' + this.deepSeekApiKey,
+                        'HTTP-Referer': window.location.origin,
+                        'X-Title': 'HealthChat',
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({
+                        model: this.deepSeekModel,
+                        messages: [
+                            {
+                                role: 'system',
+                                content: 'Ban la tro ly suc khoe. Tra loi ngan gon, de hieu, an toan va bang tieng Viet. Neu co dau hieu nguy hiem thi khuyen nguoi dung di gap bac si.'
+                            },
+                            {
+                                role: 'user',
+                                content: message
+                            }
+                        ],
+                        max_tokens: 220,
+                        temperature: 0.7
+                    }),
+                    signal: controller.signal
+                });
+
+                let data = null;
+                try {
+                    data = await response.json();
+                } catch (parseError) {
+                    data = null;
+                }
+
+                if (response.ok) {
+                    if (data && Array.isArray(data.choices) && data.choices[0] && data.choices[0].message && data.choices[0].message.content) {
+                        return String(data.choices[0].message.content).trim();
+                    }
+
+                    return null;
+                }
+
+                const isRateLimit = response.status === 429;
+                if (isRateLimit && attempt === 0) {
+                    const waitMs = 1500;
+                    await this.sleep(waitMs);
+                    continue;
+                }
+
+                console.warn('DeepSeek API error:', response.status, data);
+                return null;
+            } catch (error) {
+                console.warn('DeepSeek request failed:', error);
+                return null;
+            } finally {
+                clearTimeout(timeoutId);
+            }
+        }
+
+        return null;
     }
 
     isOffTopic(msg) {
@@ -882,7 +975,7 @@ class AIEngine {
     }
 
     handleGeneralQuestion(lowerMsg, originalMsg) {
-        if (originalMsg.length > 50) {
+        if (originalMsg.length > 150) {
             return this.getRandomResponse([
                 '💭 Câu hỏi hay! Hãy cụ thể hơn để tôi giúp tốt nhất:\n• Vấn đề gì?\n• Muốn giải quyết sao?\n• Đã cố gắng gì chưa?',
                 '🤔 Câu hỏi dài! Hãy tóm tắt lại:\n\n✅ Tôi giúp:\n• Dinh dưỡng\n• Tập luyện\n• Giấc ngủ\n• Stress\n• Việc khác',
@@ -1946,18 +2039,30 @@ class HealthChatApp {
             const loading = document.getElementById('loadingIndicator');
             if (loading) loading.style.display = 'flex';
 
-            setTimeout(function() {
+            setTimeout(async function() {
                 if (loading) loading.style.display = 'none';
-                
-                const aiResponse = healthDraftResult ? healthDraftResult.reply : aiEngine.generateResponse(message);
-                chatHistoryManager.addMessage(aiResponse, false);
-                app.updateHistoryList();
-                
-                const aiBubble = document.createElement('div');
-                aiBubble.className = 'chat-bubble ai';
-                aiBubble.innerHTML = '<p>' + aiResponse + '</p>';
-                chatMessages.appendChild(aiBubble);
-                chatMessages.scrollTop = chatMessages.scrollHeight;
+
+                try {
+                    const aiResponse = healthDraftResult ? healthDraftResult.reply : await aiEngine.generateResponseAsync(message);
+                    chatHistoryManager.addMessage(aiResponse, false);
+                    app.updateHistoryList();
+
+                    const aiBubble = document.createElement('div');
+                    aiBubble.className = 'chat-bubble ai';
+                    aiBubble.innerHTML = '<p>' + aiResponse + '</p>';
+                    chatMessages.appendChild(aiBubble);
+                    chatMessages.scrollTop = chatMessages.scrollHeight;
+                } catch (err) {
+                    console.warn('sendMainMessage failed:', err);
+                    const fallbackResponse = aiEngine.generateResponse(message);
+                    chatHistoryManager.addMessage(fallbackResponse, false);
+                    app.updateHistoryList();
+                    const aiBubble = document.createElement('div');
+                    aiBubble.className = 'chat-bubble ai';
+                    aiBubble.innerHTML = '<p>' + fallbackResponse + '</p>';
+                    chatMessages.appendChild(aiBubble);
+                    chatMessages.scrollTop = chatMessages.scrollHeight;
+                }
             }, 800);
 
             chatMessages.scrollTop = chatMessages.scrollHeight;
@@ -2109,15 +2214,25 @@ class HealthChatApp {
             const loading = document.getElementById('helpLoadingIndicator');
             if (loading) loading.style.display = 'flex';
 
-            setTimeout(function() {
+            setTimeout(async function() {
                 if (loading) loading.style.display = 'none';
-                
-                const aiResponse = aiEngine.generateResponse(message);
-                const aiBubble = document.createElement('div');
-                aiBubble.className = 'chat-bubble ai';
-                aiBubble.innerHTML = '<p>' + aiResponse + '</p>';
-                helpMessages.appendChild(aiBubble);
-                helpMessages.scrollTop = helpMessages.scrollHeight;
+
+                try {
+                    const aiResponse = await aiEngine.generateResponseAsync(message);
+                    const aiBubble = document.createElement('div');
+                    aiBubble.className = 'chat-bubble ai';
+                    aiBubble.innerHTML = '<p>' + aiResponse + '</p>';
+                    helpMessages.appendChild(aiBubble);
+                    helpMessages.scrollTop = helpMessages.scrollHeight;
+                } catch (err) {
+                    console.warn('sendHelpMessage failed:', err);
+                    const fallbackResponse = aiEngine.generateResponse(message);
+                    const aiBubble = document.createElement('div');
+                    aiBubble.className = 'chat-bubble ai';
+                    aiBubble.innerHTML = '<p>' + fallbackResponse + '</p>';
+                    helpMessages.appendChild(aiBubble);
+                    helpMessages.scrollTop = helpMessages.scrollHeight;
+                }
             }, 800);
 
             helpMessages.scrollTop = helpMessages.scrollHeight;
@@ -2698,3 +2813,6 @@ window.addEventListener('beforeunload', function() {
         clearInterval(app.timerInterval);
     }
 });
+
+
+
