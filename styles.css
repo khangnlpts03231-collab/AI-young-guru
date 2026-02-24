@@ -1157,6 +1157,10 @@ body.unauthenticated .header h1 {
     appearance: none;
 }
 
+.assessment-item input[type="range"].reverse-range {
+    direction: rtl;
+}
+
 .assessment-item input[type="range"]::-webkit-slider-thumb {
     -webkit-appearance: none;
     appearance: none;
