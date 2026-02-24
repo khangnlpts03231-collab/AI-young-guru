@@ -272,60 +272,70 @@
                             <div class="assessment-header">
                                 <label for="energyLevel">Cảm Giác Năng Lượng (1-10)</label>
                                 <label class="metric-toggle-wrap">
+                                    <span>Bật</span>
                                     <input type="checkbox" class="metric-toggle" data-metric="energy" checked>
-                                    Bật
                                 </label>
                             </div>
-                            <input type="range" id="energyLevel" min="1" max="10" value="5" data-display="energyDisplay" data-metric="energy">
-                            <span class="value-display" id="energyDisplay">5</span>
+                            <div class="assessment-range-row">
+                                <input type="range" id="energyLevel" min="1" max="10" value="5" data-display="energyDisplay" data-metric="energy">
+                                <span class="value-display" id="energyDisplay">5</span>
+                            </div>
                         </div>
 
                         <div class="assessment-item">
                             <div class="assessment-header">
                                 <label for="sleepQuality">Chất Lượng Giấc Ngủ (1-10)</label>
                                 <label class="metric-toggle-wrap">
+                                    <span>Bật</span>
                                     <input type="checkbox" class="metric-toggle" data-metric="sleep" checked>
-                                    Bật
                                 </label>
                             </div>
-                            <input type="range" id="sleepQuality" min="1" max="10" value="5" data-display="sleepDisplay" data-metric="sleep">
-                            <span class="value-display" id="sleepDisplay">5</span>
+                            <div class="assessment-range-row">
+                                <input type="range" id="sleepQuality" min="1" max="10" value="5" data-display="sleepDisplay" data-metric="sleep">
+                                <span class="value-display" id="sleepDisplay">5</span>
+                            </div>
                         </div>
 
                         <div class="assessment-item">
                             <div class="assessment-header">
                                 <label for="mood">Tâm Trạng (1-10)</label>
                                 <label class="metric-toggle-wrap">
+                                    <span>Bật</span>
                                     <input type="checkbox" class="metric-toggle" data-metric="mood" checked>
-                                    Bật
                                 </label>
                             </div>
-                            <input type="range" id="mood" min="1" max="10" value="5" data-display="moodDisplay" data-metric="mood">
-                            <span class="value-display" id="moodDisplay">5</span>
+                            <div class="assessment-range-row">
+                                <input type="range" id="mood" min="1" max="10" value="5" data-display="moodDisplay" data-metric="mood">
+                                <span class="value-display" id="moodDisplay">5</span>
+                            </div>
                         </div>
 
                         <div class="assessment-item">
                             <div class="assessment-header">
-                                <label for="stress">Stress (1-10)</label>
+                                <label for="stress">Thư Giãn (ngược với stress) (1-10)</label>
                                 <label class="metric-toggle-wrap">
+                                    <span>Bật</span>
                                     <input type="checkbox" class="metric-toggle" data-metric="stress" checked>
-                                    Bật
                                 </label>
                             </div>
-                            <input type="range" id="stress" min="1" max="10" value="5" data-display="stressDisplay" data-metric="stress" class="reverse-range">
-                            <span class="value-display" id="stressDisplay">5</span>
+                            <div class="assessment-range-row">
+                                <input type="range" id="stress" min="1" max="10" value="5" data-display="stressDisplay" data-metric="stress">
+                                <span class="value-display" id="stressDisplay">5</span>
+                            </div>
                         </div>
 
                         <div class="assessment-item">
                             <div class="assessment-header">
                                 <label for="hunger">Cơn Đói (1-10)</label>
                                 <label class="metric-toggle-wrap">
+                                    <span>Bật</span>
                                     <input type="checkbox" class="metric-toggle" data-metric="hunger" checked>
-                                    Bật
                                 </label>
                             </div>
-                            <input type="range" id="hunger" min="1" max="10" value="5" data-display="hungerDisplay" data-metric="hunger">
-                            <span class="value-display" id="hungerDisplay">5</span>
+                            <div class="assessment-range-row">
+                                <input type="range" id="hunger" min="1" max="10" value="5" data-display="hungerDisplay" data-metric="hunger">
+                                <span class="value-display" id="hungerDisplay">5</span>
+                            </div>
                         </div>
 
                         <button class="btn btn-primary" id="submitHealthBtn">Lưu Đánh Giá</button>
@@ -509,7 +519,7 @@
                         </div>
 
                         <div class="stat-card">
-                            <h3>😰 Stress Trung Bình</h3>
+                            <h3>😌 Thư Giãn Trung Bình</h3>
                             <div class="stat-value" id="avgStress">0</div>
                         </div>
 
