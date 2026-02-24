@@ -2190,7 +2190,7 @@ class HealthChatApp {
             { key: 'energy', inputId: 'energyLevel', displayId: 'energyDisplay', invert: false, icon: '💪', label: 'Năng Lượng' },
             { key: 'sleep', inputId: 'sleepQuality', displayId: 'sleepDisplay', invert: false, icon: '😴', label: 'Giấc Ngủ' },
             { key: 'mood', inputId: 'mood', displayId: 'moodDisplay', invert: false, icon: '😊', label: 'Tâm Trạng' },
-            { key: 'stress', inputId: 'stress', displayId: 'stressDisplay', invert: false, icon: '😰', label: 'Stress' },
+            { key: 'stress', inputId: 'stress', displayId: 'stressDisplay', invert: true, icon: '😰', label: 'Stress' },
             { key: 'hunger', inputId: 'hunger', displayId: 'hungerDisplay', invert: false, icon: '🍽️', label: 'Cơn Đói' }
         ];
     }
@@ -2226,7 +2226,7 @@ class HealthChatApp {
             const raw = Number(values[metric.key]);
             if (!isFinite(raw)) return;
 
-            const normalized = Math.max(1, Math.min(10, metric.invert ? (10 - raw) : raw));
+            const normalized = Math.max(1, Math.min(10, metric.invert ? (11 - raw) : raw));
             total += normalized;
             count += 1;
         });
@@ -2788,7 +2788,7 @@ class HealthChatApp {
                 { key: 'energy', invert: false },
                 { key: 'sleep', invert: false },
                 { key: 'mood', invert: false },
-                { key: 'stress', invert: false },
+                { key: 'stress', invert: true },
                 { key: 'hunger', invert: false }
             ];
             const enabledMap = item.metricsEnabled || {};
@@ -2798,7 +2798,7 @@ class HealthChatApp {
                 if (enabledMap[def.key] === false) return;
                 const raw = Number(item[def.key]);
                 if (!isFinite(raw)) return;
-                total += def.invert ? (10 - raw) : raw;
+                total += def.invert ? (11 - raw) : raw;
                 count += 1;
             });
 
@@ -3008,6 +3008,7 @@ window.addEventListener('beforeunload', function() {
         clearInterval(app.timerInterval);
     }
 });
+
 
 
 
