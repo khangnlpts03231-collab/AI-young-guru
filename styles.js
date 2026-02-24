@@ -1545,13 +1545,23 @@ class HealthChatApp {
         }
 
         // ============== HEALTH ASSESSMENT ==============
-        document.querySelectorAll('input[type="range"]').forEach(function(input) {
+        document.querySelectorAll('.assessment-item input[type="range"]').forEach(function(input) {
             input.addEventListener('input', function(e) {
-                const displayId = e.target.id + 'Display';
+                const displayId = e.target.dataset.display || (e.target.id + 'Display');
                 const display = document.getElementById(displayId);
                 if (display) display.textContent = e.target.value;
+                self.updateHealthScorePreviewFromForm();
             });
         });
+
+        document.querySelectorAll('.metric-toggle').forEach(function(toggle) {
+            toggle.addEventListener('change', function(e) {
+                self.handleMetricToggle(e.target);
+                self.updateHealthScorePreviewFromForm();
+            });
+            self.handleMetricToggle(toggle);
+        });
+        self.updateHealthScorePreviewFromForm();
 
         const submitHealthBtn = document.getElementById('submitHealthBtn');
         if (submitHealthBtn) {
@@ -2175,6 +2185,98 @@ class HealthChatApp {
         };
     }
 
+    getHealthMetricConfigs() {
+        return [
+            { key: 'energy', inputId: 'energyLevel', displayId: 'energyDisplay', invert: false, icon: '💪', label: 'Năng Lượng' },
+            { key: 'sleep', inputId: 'sleepQuality', displayId: 'sleepDisplay', invert: false, icon: '😴', label: 'Giấc Ngủ' },
+            { key: 'mood', inputId: 'mood', displayId: 'moodDisplay', invert: false, icon: '😊', label: 'Tâm Trạng' },
+            { key: 'stress', inputId: 'stress', displayId: 'stressDisplay', invert: false, icon: '😰', label: 'Stress' },
+            { key: 'hunger', inputId: 'hunger', displayId: 'hungerDisplay', invert: false, icon: '🍽️', label: 'Cơn Đói' }
+        ];
+    }
+
+    getHealthFormValues() {
+        return {
+            energy: parseInt(document.getElementById('energyLevel').value, 10),
+            sleep: parseInt(document.getElementById('sleepQuality').value, 10),
+            mood: parseInt(document.getElementById('mood').value, 10),
+            stress: parseInt(document.getElementById('stress').value, 10),
+            hunger: parseInt(document.getElementById('hunger').value, 10)
+        };
+    }
+
+    getEnabledHealthMetrics() {
+        const enabled = {};
+        const metricConfigs = this.getHealthMetricConfigs();
+        metricConfigs.forEach(function(metric) {
+            const toggle = document.querySelector('.metric-toggle[data-metric="' + metric.key + '"]');
+            enabled[metric.key] = toggle ? toggle.checked : true;
+        });
+        return enabled;
+    }
+
+    calculateHealthScore(values, enabledMap) {
+        const metricConfigs = this.getHealthMetricConfigs();
+        let total = 0;
+        let count = 0;
+
+        metricConfigs.forEach(function(metric) {
+            if (enabledMap && enabledMap[metric.key] === false) return;
+
+            const raw = Number(values[metric.key]);
+            if (!isFinite(raw)) return;
+
+            const normalized = Math.max(1, Math.min(10, metric.invert ? (10 - raw) : raw));
+            total += normalized;
+            count += 1;
+        });
+
+        if (count === 0) return null;
+        return Math.round((total / count) * 10);
+    }
+
+    updateHealthScorePreviewFromForm() {
+        const values = this.getHealthFormValues();
+        const enabledMap = this.getEnabledHealthMetrics();
+        const score = this.calculateHealthScore(values, enabledMap);
+
+        const scoreEl = document.getElementById('wellBeingScore');
+        if (scoreEl) scoreEl.textContent = score === null ? '0' : score;
+
+        const statusEl = document.getElementById('scoreStatus');
+        if (!statusEl) return;
+        if (score === null) {
+            statusEl.textContent = '⚠️ Hãy bật ít nhất 1 mục để chấm điểm.';
+            return;
+        }
+
+        let status = '😊 Tuyệt vời!';
+        if (score < 50) status = '😔 Cần cải thiện';
+        else if (score < 70) status = '😐 Bình thường';
+        statusEl.textContent = status + ' (' + score + '/100)';
+    }
+
+    handleMetricToggle(toggle) {
+        if (!toggle) return;
+        const metricKey = toggle.dataset.metric;
+        const rangeInput = document.querySelector('.assessment-item input[type="range"][data-metric="' + metricKey + '"]');
+        if (!rangeInput) return;
+
+        const isEnabled = !!toggle.checked;
+        rangeInput.disabled = !isEnabled;
+
+        const displayId = rangeInput.dataset.display || (rangeInput.id + 'Display');
+        const display = document.getElementById(displayId);
+
+        const assessmentItem = rangeInput.closest('.assessment-item');
+        if (assessmentItem) assessmentItem.classList.toggle('disabled', !isEnabled);
+
+        if (display) {
+            display.classList.toggle('value-display-disabled', !isEnabled);
+            display.textContent = isEnabled ? rangeInput.value : 'Tắt';
+        }
+    }
+
     applyHealthDraftToForm(draft) {
         const mapping = [
             ['energyLevel', 'energyDisplay', draft.energy],
@@ -2191,14 +2293,23 @@ class HealthChatApp {
             if (display) display.textContent = item[2];
         });
 
-        const draftScore = Math.round(((draft.energy + draft.sleep + draft.mood + (10 - draft.stress) + draft.hunger) / 5) * 10);
+        const self = this;
+        document.querySelectorAll('.metric-toggle').forEach(function(toggle) {
+            self.handleMetricToggle(toggle);
+        });
+
+        const draftScore = this.calculateHealthScore(draft, this.getEnabledHealthMetrics());
 
         const scoreEl = document.getElementById('wellBeingScore');
-        if (scoreEl) scoreEl.textContent = draftScore;
+        if (scoreEl) scoreEl.textContent = draftScore === null ? '0' : draftScore;
 
         const statusEl = document.getElementById('scoreStatus');
         if (statusEl) {
-            statusEl.textContent = '📝 Điểm nháp: ' + draftScore + '/100 (hãy chỉnh và bấm Lưu Đánh Giá)';
+            if (draftScore === null) {
+                statusEl.textContent = '⚠️ Hãy bật ít nhất 1 mục để chấm điểm.';
+            } else {
+                statusEl.textContent = '📝 Điểm nháp: ' + draftScore + '/100 (hãy chỉnh và bấm Lưu Đánh Giá)';
+            }
         }
     }
 
@@ -2298,22 +2409,23 @@ class HealthChatApp {
 
     // ============== HEALTH ASSESSMENT METHODS ==============
     submitHealthAssessment() {
-        const energy = parseInt(document.getElementById('energyLevel').value);
-        const sleep = parseInt(document.getElementById('sleepQuality').value);
-        const mood = parseInt(document.getElementById('mood').value);
-        const stress = parseInt(document.getElementById('stress').value);
-        const hunger = parseInt(document.getElementById('hunger').value);
-
-        const score = Math.round(((energy + sleep + mood + (10 - stress) + hunger) / 5) * 10);
+        const values = this.getHealthFormValues();
+        const enabledMap = this.getEnabledHealthMetrics();
+        const score = this.calculateHealthScore(values, enabledMap);
+        if (score === null) {
+            alert('⚠️ Hãy bật ít nhất 1 mục để lưu đánh giá.');
+            return;
+        }
 
         const assessment = {
             date: new Date().toLocaleDateString('vi-VN'),
             time: new Date().toLocaleTimeString('vi-VN'),
-            energy: energy,
-            sleep: sleep,
-            mood: mood,
-            stress: stress,
-            hunger: hunger,
+            energy: values.energy,
+            sleep: values.sleep,
+            mood: values.mood,
+            stress: values.stress,
+            hunger: values.hunger,
+            metricsEnabled: enabledMap,
             score: score
         };
 
@@ -2354,15 +2466,23 @@ class HealthChatApp {
         }
 
         healthHistory.innerHTML = appState.healthHistory.reverse().map(function(item, index) {
+            const enabledMap = item.metricsEnabled || {};
+            const metricText = function(metricKey, icon, label, value) {
+                if (enabledMap[metricKey] === false) {
+                    return '<p class="metric-disabled">' + icon + ' ' + label + ': Đã tắt</p>';
+                }
+                return '<p>' + icon + ' ' + label + ': ' + value + '/10</p>';
+            };
+
             return '<div class="history-item">' +
                 '<div class="history-item-content">' +
                 '<div class="history-date">' + item.date + ' ' + item.time + '</div>' +
                 '<div class="history-item-data">' +
-                '<p>💪 Năng Lượng: ' + item.energy + '/10</p>' +
-                '<p>😴 Giấc Ngủ: ' + item.sleep + '/10</p>' +
-                '<p>😊 Tâm Trạng: ' + item.mood + '/10</p>' +
-                '<p>😰 Stress: ' + item.stress + '/10</p>' +
-                '<p>🍽️ Cơn Đói: ' + item.hunger + '/10</p>' +
+                metricText('energy', '💪', 'Năng Lượng', item.energy) +
+                metricText('sleep', '😴', 'Giấc Ngủ', item.sleep) +
+                metricText('mood', '😊', 'Tâm Trạng', item.mood) +
+                metricText('stress', '😰', 'Stress', item.stress) +
+                metricText('hunger', '🍽️', 'Cơn Đói', item.hunger) +
                 '</div>' +
                 '<div class="history-item-score">🎯 Điểm: ' + item.score + '/100</div>' +
                 '</div>' +
@@ -2664,12 +2784,39 @@ class HealthChatApp {
                 return Math.max(0, Math.min(10, item.score / 10));
             }
 
-            const energy = Number(item.energy) || 0;
-            const sleep = Number(item.sleep) || 0;
-            const mood = Number(item.mood) || 0;
-            const stress = Number(item.stress) || 0;
-            const hunger = Number(item.hunger) || 0;
-            return Math.max(0, Math.min(10, (energy + sleep + mood + (10 - stress) + hunger) / 5));
+        const defs = [
+                { key: 'energy', invert: false },
+                { key: 'sleep', invert: false },
+                { key: 'mood', invert: false },
+                { key: 'stress', invert: false },
+                { key: 'hunger', invert: false }
+            ];
+            const enabledMap = item.metricsEnabled || {};
+            let total = 0;
+            let count = 0;
+            defs.forEach(function(def) {
+                if (enabledMap[def.key] === false) return;
+                const raw = Number(item[def.key]);
+                if (!isFinite(raw)) return;
+                total += def.invert ? (10 - raw) : raw;
+                count += 1;
+            });
+
+            if (count === 0) return 0;
+            return Math.max(0, Math.min(10, total / count));
+        };
+
+        const averageMetric = function(list, metricKey) {
+            const values = list.filter(function(item) {
+                return !(item.metricsEnabled && item.metricsEnabled[metricKey] === false);
+            }).map(function(item) {
+                return Number(item[metricKey]);
+            }).filter(function(value) {
+                return isFinite(value);
+            });
+
+            if (values.length === 0) return '--';
+            return (values.reduce(function(sum, value) { return sum + value; }, 0) / values.length).toFixed(1);
         };
 
         const avgScoreEl = document.getElementById('avgScore');
@@ -2715,11 +2862,11 @@ class HealthChatApp {
             return;
         }
 
-        const avgEnergy = (filtered.reduce(function(a, b) { return a + b.energy; }, 0) / filtered.length).toFixed(1);
-        const avgSleep = (filtered.reduce(function(a, b) { return a + b.sleep; }, 0) / filtered.length).toFixed(1);
-        const avgMood = (filtered.reduce(function(a, b) { return a + b.mood; }, 0) / filtered.length).toFixed(1);
-        const avgStress = (filtered.reduce(function(a, b) { return a + b.stress; }, 0) / filtered.length).toFixed(1);
-        const avgHunger = (filtered.reduce(function(a, b) { return a + b.hunger; }, 0) / filtered.length).toFixed(1);
+        const avgEnergy = averageMetric(filtered, 'energy');
+        const avgSleep = averageMetric(filtered, 'sleep');
+        const avgMood = averageMetric(filtered, 'mood');
+        const avgStress = averageMetric(filtered, 'stress');
+        const avgHunger = averageMetric(filtered, 'hunger');
 
         document.getElementById('avgEnergy').textContent = avgEnergy;
         document.getElementById('avgSleep').textContent = avgSleep;

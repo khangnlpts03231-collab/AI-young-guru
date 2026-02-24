@@ -1110,6 +1110,16 @@ body.unauthenticated .header h1 {
 
 .assessment-item {
     margin: 20px 0;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+}
+
+.assessment-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 12px;
 }
 
 .assessment-item label {
@@ -1117,6 +1127,24 @@ body.unauthenticated .header h1 {
     margin-bottom: 10px;
     font-weight: 500;
     color: var(--text-primary);
+}
+
+.assessment-header > label {
+    margin-bottom: 0;
+}
+
+.metric-toggle-wrap {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 13px;
+    color: var(--text-secondary);
+    user-select: none;
+    margin-bottom: 0;
+}
+
+.metric-toggle-wrap input[type="checkbox"] {
+    accent-color: var(--primary-color);
 }
 
 .assessment-item input[type="range"] {
@@ -1161,12 +1189,31 @@ body.unauthenticated .header h1 {
 }
 
 .value-display {
-    float: right;
+    float: none;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    min-width: 42px;
     background: var(--light-bg);
     padding: 4px 12px;
     border-radius: 20px;
     color: var(--primary-color);
     font-weight: 600;
+    margin-left: auto;
+}
+
+.assessment-item.disabled input[type="range"] {
+    opacity: 0.45;
+    cursor: not-allowed;
+}
+
+.value-display.value-display-disabled {
+    color: var(--text-secondary);
+}
+
+.history-item-data p.metric-disabled {
+    color: var(--text-secondary);
+    font-style: italic;
 }
 
 .health-history {
