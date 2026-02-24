@@ -435,7 +435,7 @@ class AIEngine {
         this.conversationContext = [];
         this.conversationHistory = [];
         this.rightCareUrl = 'https://chatgpt.com/g/g-67657a1bfffc819190a59d65f229376d-rightcare-tu-van-suc-khoe';
-        this.deepSeekApiKey = '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';
+        this.deepSeekApiKey = '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';
         this.deepSeekModel = 'deepseek/deepseek-chat';
     }
 
@@ -2813,6 +2813,7 @@ window.addEventListener('beforeunload', function() {
         clearInterval(app.timerInterval);
     }
 });
+
 
 
 
