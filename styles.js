@@ -435,7 +435,7 @@ class AIEngine {
         this.conversationContext = [];
         this.conversationHistory = [];
         this.rightCareUrl = 'https://chatgpt.com/g/g-67657a1bfffc819190a59d65f229376d-rightcare-tu-van-suc-khoe';
-        this.deepSeekApiKey = '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';
+        this.deepSeekApiKey = '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';
         this.deepSeekModel = 'deepseek/deepseek-chat';
     }
 
