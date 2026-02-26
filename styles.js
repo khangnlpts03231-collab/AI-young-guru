@@ -261,6 +261,8 @@ class AppState {
         this.isAuthenticated = false;
         this.currentPage = 'login';
         this.healthHistory = [];
+        this.dailyCheckIns = [];
+        this.gamification = this.getDefaultGamificationState();
         this.initialHealthData = {
             name: '',
             health: '',
@@ -271,6 +273,111 @@ class AppState {
         };
         this.initializeDemoUser();
         this.loadFromLocalStorage();
+    }
+
+    getDefaultGamificationState() {
+        return {
+            coins: 0,
+            dailyMissions: {
+                dateKey: '',
+                missions: [],
+                chatSeconds: 0
+            },
+            shopInventory: {
+                streakShield: 0,
+                honorBadge: 0
+            },
+            shopWeeklySales: {
+                weekKey: '',
+                purchases: {}
+            },
+            streakShieldUsedDates: []
+        };
+    }
+
+    getGamificationKey() {
+        const userEmail = this.currentUser && this.currentUser.email
+            ? this.currentUser.email.trim().toLowerCase()
+            : 'guest';
+        return 'gamification_' + userEmail;
+    }
+
+    normalizeShopInventory(inventory) {
+        const parsed = inventory && typeof inventory === 'object' ? inventory : {};
+        return {
+            streakShield: Math.max(0, parseInt(parsed.streakShield, 10) || 0),
+            honorBadge: Math.max(0, parseInt(parsed.honorBadge, 10) || 0)
+        };
+    }
+
+    normalizeShopWeeklySales(sales) {
+        const parsed = sales && typeof sales === 'object' ? sales : {};
+        const purchases = {};
+
+        if (parsed.purchases && typeof parsed.purchases === 'object') {
+            Object.keys(parsed.purchases).forEach(function(key) {
+                purchases[key] = Math.max(0, parseInt(parsed.purchases[key], 10) || 0);
+            });
+        }
+
+        return {
+            weekKey: typeof parsed.weekKey === 'string' ? parsed.weekKey : '',
+            purchases: purchases
+        };
+    }
+
+    normalizeDailyMissionState(missionState) {
+        const parsed = missionState && typeof missionState === 'object' ? missionState : {};
+        const missions = Array.isArray(parsed.missions) ? parsed.missions : [];
+
+        const normalizedMissions = missions.map(function(mission) {
+            if (!mission || typeof mission !== 'object') return null;
+            const target = Math.max(1, parseInt(mission.target, 10) || 1);
+            const progress = Math.max(0, Math.min(target, parseInt(mission.progress, 10) || 0));
+            const reward = Math.max(0, parseInt(mission.reward, 10) || 0);
+            const completed = !!mission.completed || progress >= target;
+
+            return {
+                id: typeof mission.id === 'string' ? mission.id : '',
+                type: typeof mission.type === 'string' ? mission.type : '',
+                title: typeof mission.title === 'string' ? mission.title : '',
+                target: target,
+                progress: progress,
+                reward: reward,
+                completed: completed,
+                rewardClaimed: !!mission.rewardClaimed
+            };
+        }).filter(function(mission) { return mission !== null; });
+
+        return {
+            dateKey: typeof parsed.dateKey === 'string' ? parsed.dateKey : '',
+            missions: normalizedMissions,
+            chatSeconds: Math.max(0, parseInt(parsed.chatSeconds, 10) || 0)
+        };
+    }
+
+    normalizeShieldUsedDates(dates) {
+        if (!Array.isArray(dates)) return [];
+
+        const unique = new Set();
+        dates.forEach(function(dateKey) {
+            if (typeof dateKey === 'string' && dateKey) unique.add(dateKey);
+        });
+
+        return Array.from(unique).sort();
+    }
+
+    normalizeGamificationState(data) {
+        const defaults = this.getDefaultGamificationState();
+        const parsed = data && typeof data === 'object' ? data : {};
+
+        return {
+            coins: Math.max(0, parseInt(parsed.coins, 10) || 0),
+            dailyMissions: this.normalizeDailyMissionState(parsed.dailyMissions || defaults.dailyMissions),
+            shopInventory: this.normalizeShopInventory(parsed.shopInventory || defaults.shopInventory),
+            shopWeeklySales: this.normalizeShopWeeklySales(parsed.shopWeeklySales || defaults.shopWeeklySales),
+            streakShieldUsedDates: this.normalizeShieldUsedDates(parsed.streakShieldUsedDates || defaults.streakShieldUsedDates)
+        };
     }
 
     initializeDemoUser() {
@@ -304,6 +411,9 @@ class AppState {
         if (savedInitialHealth) {
             this.initialHealthData = JSON.parse(savedInitialHealth);
         }
+
+        this.loadDailyCheckIns();
+        this.loadGamificationState();
     }
 
     saveToLocalStorage() {
@@ -312,6 +422,72 @@ class AppState {
         }
         localStorage.setItem('healthHistory', JSON.stringify(this.healthHistory));
         localStorage.setItem('initialHealthData', JSON.stringify(this.initialHealthData));
+        this.saveDailyCheckIns();
+        this.saveGamificationState();
+    }
+
+    getDailyCheckInKey() {
+        const userEmail = this.currentUser && this.currentUser.email
+            ? this.currentUser.email.trim().toLowerCase()
+            : 'guest';
+        return 'dailyCheckIns_' + userEmail;
+    }
+
+    normalizeDailyCheckIns(list) {
+        if (!Array.isArray(list)) return [];
+        return list.map(function(item) {
+            if (typeof item === 'string') {
+                return {
+                    dateKey: item,
+                    source: 'legacy',
+                    timestamp: null
+                };
+            }
+            if (!item || typeof item !== 'object') return null;
+            if (!item.dateKey || typeof item.dateKey !== 'string') return null;
+            return {
+                dateKey: item.dateKey,
+                source: typeof item.source === 'string' ? item.source : 'manual',
+                timestamp: typeof item.timestamp === 'number' ? item.timestamp : null
+            };
+        }).filter(function(item) { return item !== null; });
+    }
+
+    loadDailyCheckIns() {
+        const saved = localStorage.getItem(this.getDailyCheckInKey());
+        if (!saved) {
+            this.dailyCheckIns = [];
+            return;
+        }
+
+        try {
+            this.dailyCheckIns = this.normalizeDailyCheckIns(JSON.parse(saved));
+        } catch (e) {
+            this.dailyCheckIns = [];
+        }
+    }
+
+    saveDailyCheckIns() {
+        localStorage.setItem(this.getDailyCheckInKey(), JSON.stringify(this.dailyCheckIns || []));
+    }
+
+    loadGamificationState() {
+        const raw = localStorage.getItem(this.getGamificationKey());
+        if (!raw) {
+            this.gamification = this.getDefaultGamificationState();
+            return;
+        }
+
+        try {
+            this.gamification = this.normalizeGamificationState(JSON.parse(raw));
+        } catch (e) {
+            this.gamification = this.getDefaultGamificationState();
+        }
+    }
+
+    saveGamificationState() {
+        this.gamification = this.normalizeGamificationState(this.gamification);
+        localStorage.setItem(this.getGamificationKey(), JSON.stringify(this.gamification));
     }
 }
 
@@ -438,13 +614,14 @@ class AIEngine {
         const configuredEndpoint = typeof window.CHAT_API_ENDPOINT === 'string'
             ? window.CHAT_API_ENDPOINT.trim()
             : '';
+        this.configuredEndpoint = configuredEndpoint;
+        this.localChatApiEndpoint = 'http://localhost:3000/api/chat';
+        this.remoteChatApiEndpoint = 'https://healthchat-server.onrender.com/api/chat';
         const isLocal = window.location.protocol === 'file:' ||
             window.location.hostname === 'localhost' ||
             window.location.hostname === '127.0.0.1';
         this.chatApiEndpoint = configuredEndpoint ||
-            (isLocal
-                ? 'http://localhost:3000/api/chat'
-                : 'https://healthchat-server.onrender.com/api/chat');
+            (isLocal ? this.localChatApiEndpoint : this.remoteChatApiEndpoint);
     }
 
     generateResponse(message) {
@@ -533,64 +710,78 @@ class AIEngine {
         });
     }
 
+    getCandidateChatEndpoints() {
+        const endpoints = [this.chatApiEndpoint];
+        // Khi khong set endpoint thu cong, thu fallback localhost neu endpoint hien tai that bai.
+        if (!this.configuredEndpoint && this.chatApiEndpoint !== this.localChatApiEndpoint) {
+            endpoints.push(this.localChatApiEndpoint);
+        }
+        return Array.from(new Set(endpoints.filter(Boolean)));
+    }
+
     async getDeepSeekResponse(message) {
-        for (let attempt = 0; attempt < 2; attempt++) {
-            const controller = new AbortController();
-            const timeoutId = setTimeout(function() { controller.abort(); }, 20000);
+        const endpoints = this.getCandidateChatEndpoints();
+        for (let endpointIndex = 0; endpointIndex < endpoints.length; endpointIndex++) {
+            const endpoint = endpoints[endpointIndex];
 
-            try {
-                const response = await fetch(this.chatApiEndpoint, {
-                    method: 'POST',
-                    headers: {
-                        'Content-Type': 'application/json'
-                    },
-                    body: JSON.stringify({
-                        messages: [
-                            {
-                                role: 'system',
-                                content: 'Ban la tro ly suc khoe. Tra loi ngan gon, de hieu, an toan va bang tieng Viet. Neu co dau hieu nguy hiem thi khuyen nguoi dung di gap bac si.'
-                            },
-                            {
-                                role: 'user',
-                                content: message
-                            }
-                        ],
-                        max_tokens: 220,
-                        temperature: 0.7
-                    }),
-                    signal: controller.signal
-                });
+            for (let attempt = 0; attempt < 2; attempt++) {
+                const controller = new AbortController();
+                const timeoutId = setTimeout(function() { controller.abort(); }, 20000);
 
-                let data = null;
                 try {
-                    data = await response.json();
-                } catch (parseError) {
-                    data = null;
-                }
+                    const response = await fetch(endpoint, {
+                        method: 'POST',
+                        headers: {
+                            'Content-Type': 'application/json'
+                        },
+                        body: JSON.stringify({
+                            messages: [
+                                {
+                                    role: 'system',
+                                    content: 'Ban la tro ly suc khoe. Tra loi ngan gon, de hieu, an toan va bang tieng Viet. Neu co dau hieu nguy hiem thi khuyen nguoi dung di gap bac si.'
+                                },
+                                {
+                                    role: 'user',
+                                    content: message
+                                }
+                            ],
+                            max_tokens: 220,
+                            temperature: 0.7
+                        }),
+                        signal: controller.signal
+                    });
 
-                if (response.ok) {
-                    if (data && Array.isArray(data.choices) && data.choices[0] && data.choices[0].message && data.choices[0].message.content) {
-                        return String(data.choices[0].message.content).trim();
+                    let data = null;
+                    try {
+                        data = await response.json();
+                    } catch (parseError) {
+                        data = null;
                     }
 
-                    return null;
-                }
+                    if (response.ok) {
+                        if (data && Array.isArray(data.choices) && data.choices[0] && data.choices[0].message && data.choices[0].message.content) {
+                            return String(data.choices[0].message.content).trim();
+                        }
 
-                const isRateLimit = response.status === 429;
-                if (isRateLimit && attempt === 0) {
-                    const waitMs = 1500;
-                    await this.sleep(waitMs);
-                    continue;
-                }
+                        return null;
+                    }
 
-                const errorDetails = data && data.details ? data.details : data;
-                console.warn('Chat backend error:', response.status, errorDetails);
-                return null;
-            } catch (error) {
-                console.warn('DeepSeek request failed:', error, 'Backend co the chua chay. Hay chay chatbot-server o cong 3000.');
-                return null;
-            } finally {
-                clearTimeout(timeoutId);
+                    const isRateLimit = response.status === 429;
+                    if (isRateLimit && attempt === 0) {
+                        const waitMs = 1500;
+                        await this.sleep(waitMs);
+                        continue;
+                    }
+
+                    const errorDetails = data && data.details ? data.details : data;
+                    console.warn('Chat backend error:', endpoint, response.status, errorDetails);
+                    break;
+                } catch (error) {
+                    console.warn('DeepSeek request failed:', endpoint, error, 'Backend co the chua chay. Hay chay chatbot-server o cong 3000.');
+                    break;
+                } finally {
+                    clearTimeout(timeoutId);
+                }
             }
         }
 
@@ -1346,13 +1537,17 @@ class HealthChatApp {
         this.currentFilterDays = 1;
         this.resetPasswordEmail = null;
         this.timerInterval = null;
+        this.chatMissionTick = 0;
+        this.streakShopOpen = false;
         const savedHistoryPanelState = localStorage.getItem('historyPanelCollapsed');
         this.historyPanelCollapsed = savedHistoryPanelState === null
             ? window.matchMedia('(max-width: 768px)').matches
             : savedHistoryPanelState === '1';
         this.initializeEventListeners();
+        this.startMissionTrackingTimer();
         
         if (appState.isAuthenticated) {
+            this.ensureGamificationState();
             this.goToPage('chat');
         }
     }
@@ -1530,17 +1725,13 @@ class HealthChatApp {
             });
         }
 
-        const helpSendBtn = document.getElementById('helpSendBtn');
-        if (helpSendBtn) {
-            helpSendBtn.addEventListener('click', function() {
-                self.sendHelpMessage();
-            });
-        }
-
-        const helpInput = document.getElementById('helpInput');
-        if (helpInput) {
-            helpInput.addEventListener('keypress', function(e) {
-                if (e.key === 'Enter') self.sendHelpMessage();
+        const chatMessages = document.getElementById('chatMessages');
+        if (chatMessages) {
+            chatMessages.addEventListener('click', function(e) {
+                const suggestionBtn = e.target.closest('.chat-suggestion-btn');
+                if (!suggestionBtn) return;
+                const suggestionText = suggestionBtn.getAttribute('data-suggestion') || suggestionBtn.textContent || '';
+                self.sendMainMessage(suggestionText);
             });
         }
 
@@ -1583,6 +1774,41 @@ class HealthChatApp {
         if (clearAllHistoryBtn) {
             clearAllHistoryBtn.addEventListener('click', function() {
                 self.clearAllHistory();
+            });
+        }
+
+        const checkInTodayBtn = document.getElementById('checkInTodayBtn');
+        if (checkInTodayBtn) {
+            checkInTodayBtn.addEventListener('click', function() {
+                self.handleManualCheckIn();
+            });
+        }
+
+        const toggleShopBtn = document.getElementById('toggleShopBtn');
+        if (toggleShopBtn) {
+            toggleShopBtn.addEventListener('click', function() {
+                self.toggleStreakShop();
+            });
+        }
+
+        const buyStreakShieldBtn = document.getElementById('buyStreakShieldBtn');
+        if (buyStreakShieldBtn) {
+            buyStreakShieldBtn.addEventListener('click', function() {
+                self.buyShopItem('streakShield');
+            });
+        }
+
+        const buyMysteryRewardBtn = document.getElementById('buyMysteryRewardBtn');
+        if (buyMysteryRewardBtn) {
+            buyMysteryRewardBtn.addEventListener('click', function() {
+                self.buyShopItem('mysteryReward');
+            });
+        }
+
+        const buyHonorBadgeBtn = document.getElementById('buyHonorBadgeBtn');
+        if (buyHonorBadgeBtn) {
+            buyHonorBadgeBtn.addEventListener('click', function() {
+                self.buyShopItem('honorBadge');
             });
         }
 
@@ -1759,6 +1985,566 @@ class HealthChatApp {
         });
     }
 
+    startMissionTrackingTimer() {
+        if (this.timerInterval) {
+            clearInterval(this.timerInterval);
+        }
+
+        const self = this;
+        this.timerInterval = setInterval(function() {
+            self.trackChatMissionTick();
+        }, 1000);
+    }
+
+    ensureGamificationState() {
+        if (!appState.isAuthenticated) return;
+
+        appState.gamification = appState.normalizeGamificationState(appState.gamification);
+        const missionState = this.ensureDailyMissionState();
+        const shopReset = this.ensureWeeklyShopState();
+
+        if (missionState || shopReset) {
+            this.updateCoinDisplay();
+        }
+    }
+
+    getDailyMissionTemplates() {
+        return {
+            healthMandatory: {
+                id: 'health_assessment_once',
+                type: 'health_assessment',
+                title: 'Đánh giá sức khỏe 1 lần',
+                target: 1,
+                reward: 3
+            },
+            rotating: [
+                {
+                    id: 'chat_for_5_minutes',
+                    type: 'chat_seconds',
+                    title: 'Nói chuyện với AI 5 phút',
+                    target: 300,
+                    reward: 2
+                },
+                {
+                    id: 'schedule_open_3',
+                    type: 'schedule_open',
+                    title: 'Lên lịch khóa biểu 3 lần',
+                    target: 3,
+                    reward: 2
+                },
+                {
+                    id: 'schedule_open_1',
+                    type: 'schedule_open',
+                    title: 'Lên lịch khóa biểu 1 lần',
+                    target: 1,
+                    reward: 1
+                }
+            ]
+        };
+    }
+
+    buildDailyMissionsForDate() {
+        const templates = this.getDailyMissionTemplates();
+        const rotatingPool = templates.rotating.slice();
+
+        for (let i = rotatingPool.length - 1; i > 0; i--) {
+            const randomIndex = Math.floor(Math.random() * (i + 1));
+            const temp = rotatingPool[i];
+            rotatingPool[i] = rotatingPool[randomIndex];
+            rotatingPool[randomIndex] = temp;
+        }
+
+        const selected = rotatingPool.slice(0, 2);
+        const allMissions = [templates.healthMandatory].concat(selected);
+
+        return allMissions.map(function(template) {
+            return {
+                id: template.id,
+                type: template.type,
+                title: template.title,
+                target: template.target,
+                progress: 0,
+                reward: template.reward,
+                completed: false,
+                rewardClaimed: false
+            };
+        });
+    }
+
+    settleMissionRewards(missionState) {
+        if (!missionState || !Array.isArray(missionState.missions)) {
+            return { changed: false, gainedCoins: 0 };
+        }
+
+        let changed = false;
+        let gainedCoins = 0;
+
+        missionState.missions.forEach(function(mission) {
+            const target = Math.max(1, parseInt(mission.target, 10) || 1);
+            const normalizedProgress = Math.max(0, Math.min(target, parseInt(mission.progress, 10) || 0));
+
+            if (target !== mission.target) {
+                mission.target = target;
+                changed = true;
+            }
+
+            if (normalizedProgress !== mission.progress) {
+                mission.progress = normalizedProgress;
+                changed = true;
+            }
+
+            const shouldComplete = mission.progress >= mission.target;
+            if (shouldComplete !== !!mission.completed) {
+                mission.completed = shouldComplete;
+                changed = true;
+            }
+
+            if (mission.completed && !mission.rewardClaimed) {
+                mission.rewardClaimed = true;
+                gainedCoins += Math.max(0, parseInt(mission.reward, 10) || 0);
+                changed = true;
+            }
+        });
+
+        if (gainedCoins > 0) {
+            appState.gamification.coins = Math.max(0, parseInt(appState.gamification.coins, 10) || 0) + gainedCoins;
+            changed = true;
+        }
+
+        return { changed: changed, gainedCoins: gainedCoins };
+    }
+
+    ensureDailyMissionState() {
+        if (!appState.isAuthenticated) return null;
+
+        appState.gamification = appState.normalizeGamificationState(appState.gamification);
+        const todayKey = this.getTodayDateKey();
+        const missionState = appState.gamification.dailyMissions || {};
+        const missions = Array.isArray(missionState.missions) ? missionState.missions : [];
+        const hasMandatoryMission = missions.some(function(mission) {
+            return mission && mission.id === 'health_assessment_once';
+        });
+
+        let changed = false;
+
+        if (missionState.dateKey !== todayKey || missions.length !== 3 || !hasMandatoryMission) {
+            appState.gamification.dailyMissions = {
+                dateKey: todayKey,
+                missions: this.buildDailyMissionsForDate(todayKey),
+                chatSeconds: 0
+            };
+            changed = true;
+        }
+
+        const activeState = appState.gamification.dailyMissions;
+        activeState.chatSeconds = Math.max(0, parseInt(activeState.chatSeconds, 10) || 0);
+        activeState.missions.forEach(function(mission) {
+            if (mission.type === 'chat_seconds') {
+                const nextProgress = Math.min(mission.target, activeState.chatSeconds);
+                if (nextProgress !== mission.progress) {
+                    mission.progress = nextProgress;
+                    changed = true;
+                }
+            }
+        });
+
+        const settled = this.settleMissionRewards(activeState);
+        if (settled.changed) changed = true;
+
+        if (changed) {
+            appState.saveGamificationState();
+        }
+
+        return activeState;
+    }
+
+    updateMissionProgress(missionType, amount, options) {
+        if (!appState.isAuthenticated) return 0;
+
+        const config = options || {};
+        const increment = Math.max(0, parseInt(amount, 10) || 0);
+        if (increment <= 0) return 0;
+
+        const missionState = this.ensureDailyMissionState();
+        if (!missionState || !Array.isArray(missionState.missions)) return 0;
+
+        let changed = false;
+
+        if (missionType === 'chat_seconds') {
+            const maxChatTarget = missionState.missions.reduce(function(maxValue, mission) {
+                if (mission.type !== 'chat_seconds') return maxValue;
+                return Math.max(maxValue, Math.max(1, parseInt(mission.target, 10) || 1));
+            }, 0);
+            if (maxChatTarget <= 0) {
+                return 0;
+            }
+
+            const nextSeconds = Math.min(maxChatTarget, missionState.chatSeconds + increment);
+            if (nextSeconds !== missionState.chatSeconds) {
+                missionState.chatSeconds = nextSeconds;
+                changed = true;
+            }
+        }
+
+        missionState.missions.forEach(function(mission) {
+            if (mission.type !== missionType) return;
+
+            const target = Math.max(1, parseInt(mission.target, 10) || 1);
+            const current = Math.max(0, parseInt(mission.progress, 10) || 0);
+            const nextProgress = missionType === 'chat_seconds'
+                ? Math.min(target, missionState.chatSeconds)
+                : Math.min(target, current + increment);
+
+            if (nextProgress !== current) {
+                mission.progress = nextProgress;
+                changed = true;
+            }
+        });
+
+        const settled = this.settleMissionRewards(missionState);
+        if (settled.changed) changed = true;
+
+        if (changed) {
+            appState.saveGamificationState();
+        }
+
+        if (changed && !config.skipRender) {
+            this.renderDailyMissions();
+            this.renderShopState();
+        } else if (settled.gainedCoins > 0) {
+            this.renderDailyMissions();
+            this.renderShopState();
+        }
+
+        return settled.gainedCoins;
+    }
+
+    trackChatMissionTick() {
+        if (!appState.isAuthenticated) {
+            this.chatMissionTick = 0;
+            return;
+        }
+
+        if (document.hidden || appState.currentPage !== 'chat') {
+            this.chatMissionTick = 0;
+            return;
+        }
+
+        this.chatMissionTick += 1;
+        this.updateMissionProgress('chat_seconds', 1, { skipRender: true });
+
+        if (this.chatMissionTick % 5 === 0) {
+            this.renderDailyMissions();
+        }
+    }
+
+    renderDailyMissions() {
+        const missionList = document.getElementById('dailyMissionList');
+        const missionDateLabel = document.getElementById('missionDateLabel');
+        if (!missionList && !missionDateLabel) return;
+
+        if (!appState.isAuthenticated) {
+            if (missionList) {
+                missionList.innerHTML = '<div class="stats-empty">Đăng nhập để theo dõi nhiệm vụ.</div>';
+            }
+            if (missionDateLabel) missionDateLabel.textContent = '';
+            return;
+        }
+
+        const missionState = this.ensureDailyMissionState();
+        if (!missionState) return;
+
+        if (missionDateLabel) {
+            const dateParts = missionState.dateKey.split('-');
+            if (dateParts.length === 3) {
+                missionDateLabel.textContent = 'Hôm nay: ' + dateParts[2] + '/' + dateParts[1] + '/' + dateParts[0];
+            } else {
+                missionDateLabel.textContent = '';
+            }
+        }
+
+        if (!missionList) return;
+
+        if (!missionState.missions || missionState.missions.length === 0) {
+            missionList.innerHTML = '<div class="stats-empty">Chưa có nhiệm vụ cho hôm nay.</div>';
+            return;
+        }
+
+        missionList.innerHTML = missionState.missions.map(function(mission) {
+            const progress = Math.max(0, parseInt(mission.progress, 10) || 0);
+            const target = Math.max(1, parseInt(mission.target, 10) || 1);
+            const percent = Math.max(0, Math.min(100, (progress / target) * 100));
+            const done = !!mission.completed;
+            const doneLabel = done ? '✅ Hoàn thành' : '⏳ Đang thực hiện';
+
+            return '<div class="daily-mission-item' + (done ? ' done' : '') + '">' +
+                '<div class="daily-mission-top">' +
+                '<span class="daily-mission-title">' + mission.title + '</span>' +
+                '<span class="daily-mission-reward">+' + mission.reward + ' 🔥</span>' +
+                '</div>' +
+                '<div class="daily-mission-progress">' +
+                '<span>' + progress + '/' + target + '</span>' +
+                '<div class="daily-mission-bar"><span style="width:' + percent.toFixed(1) + '%;"></span></div>' +
+                '<span>' + doneLabel + '</span>' +
+                '</div>' +
+                '</div>';
+        }).join('');
+    }
+
+    getCurrentWeekKey(referenceDate) {
+        const date = new Date(referenceDate || Date.now());
+        date.setHours(0, 0, 0, 0);
+
+        const day = (date.getDay() + 6) % 7;
+        date.setDate(date.getDate() - day + 3);
+        const firstThursday = new Date(date.getFullYear(), 0, 4);
+        const firstThursdayDay = (firstThursday.getDay() + 6) % 7;
+        firstThursday.setDate(firstThursday.getDate() - firstThursdayDay + 3);
+
+        const weekNo = 1 + Math.round((date.getTime() - firstThursday.getTime()) / (7 * 24 * 60 * 60 * 1000));
+        return date.getFullYear() + '-W' + String(weekNo).padStart(2, '0');
+    }
+
+    getNextShopResetDate(referenceDate) {
+        const date = new Date(referenceDate || Date.now());
+        date.setHours(0, 0, 0, 0);
+        const day = (date.getDay() + 6) % 7;
+        const nextReset = new Date(date);
+        nextReset.setDate(date.getDate() + (7 - day));
+        return nextReset;
+    }
+
+    ensureWeeklyShopState() {
+        if (!appState.isAuthenticated) return false;
+
+        appState.gamification = appState.normalizeGamificationState(appState.gamification);
+        const weekKey = this.getCurrentWeekKey(new Date());
+        const weekly = appState.gamification.shopWeeklySales || { weekKey: '', purchases: {} };
+        const purchases = weekly.purchases && typeof weekly.purchases === 'object' ? weekly.purchases : {};
+
+        appState.gamification.shopWeeklySales = {
+            weekKey: weekly.weekKey || '',
+            purchases: purchases
+        };
+
+        if (weekly.weekKey === weekKey) {
+            return false;
+        }
+
+        appState.gamification.shopWeeklySales = {
+            weekKey: weekKey,
+            purchases: {}
+        };
+        appState.saveGamificationState();
+        return true;
+    }
+
+    getShopCatalog() {
+        return {
+            streakShield: {
+                title: 'Đóng băng chuỗi',
+                price: 10,
+                weeklyLimit: 1,
+                inventoryKey: 'streakShield'
+            },
+            mysteryReward: {
+                title: 'Phần thưởng bí ẩn',
+                price: 15,
+                weeklyLimit: 1,
+                inventoryKey: ''
+            },
+            honorBadge: {
+                title: 'Huy hiệu danh dự',
+                price: 30,
+                weeklyLimit: 1,
+                inventoryKey: 'honorBadge'
+            }
+        };
+    }
+
+    toggleStreakShop(forceOpen) {
+        const shopCard = document.getElementById('streakShopCard');
+        const toggleShopBtn = document.getElementById('toggleShopBtn');
+        if (!shopCard) return;
+
+        if (typeof forceOpen === 'boolean') {
+            this.streakShopOpen = forceOpen;
+        } else {
+            this.streakShopOpen = !this.streakShopOpen;
+        }
+
+        shopCard.classList.toggle('hidden', !this.streakShopOpen);
+        if (toggleShopBtn) {
+            toggleShopBtn.textContent = this.streakShopOpen ? '❌ Đóng cửa hàng' : '🛒 Vào cửa hàng';
+        }
+
+        if (this.streakShopOpen) {
+            this.renderShopState();
+        }
+    }
+
+    updateCoinDisplay() {
+        const coinBalance = document.getElementById('coinBalance');
+        if (coinBalance) {
+            coinBalance.textContent = String(Math.max(0, parseInt(appState.gamification.coins, 10) || 0));
+        }
+    }
+
+    renderShopState() {
+        const shopCard = document.getElementById('streakShopCard');
+        if (!shopCard) return;
+
+        if (!appState.isAuthenticated) {
+            this.updateCoinDisplay();
+            return;
+        }
+
+        this.ensureWeeklyShopState();
+        appState.gamification = appState.normalizeGamificationState(appState.gamification);
+        this.updateCoinDisplay();
+
+        const inventory = appState.gamification.shopInventory || {};
+        const weekly = appState.gamification.shopWeeklySales || { purchases: {} };
+        const purchases = weekly.purchases || {};
+        const coins = Math.max(0, parseInt(appState.gamification.coins, 10) || 0);
+        const catalog = this.getShopCatalog();
+
+        const shieldOwned = document.getElementById('shopShieldOwned');
+        if (shieldOwned) shieldOwned.textContent = String(Math.max(0, parseInt(inventory.streakShield, 10) || 0));
+
+        const honorOwned = document.getElementById('shopHonorBadgeOwned');
+        if (honorOwned) honorOwned.textContent = String(Math.max(0, parseInt(inventory.honorBadge, 10) || 0));
+
+        const shopResetInfo = document.getElementById('shopResetInfo');
+        if (shopResetInfo) {
+            const resetDate = this.getNextShopResetDate(new Date());
+            shopResetInfo.textContent = 'Reset: ' + resetDate.toLocaleDateString('vi-VN');
+        }
+
+        const setButtonState = function(buttonId, itemKey) {
+            const button = document.getElementById(buttonId);
+            if (!button) return;
+
+            const item = catalog[itemKey];
+            if (!item) return;
+
+            const bought = Math.max(0, parseInt(purchases[itemKey], 10) || 0);
+            const soldOut = bought >= item.weeklyLimit;
+            const enoughCoin = coins >= item.price;
+
+            button.disabled = soldOut || !enoughCoin;
+            if (soldOut) {
+                button.textContent = 'Hết lượt tuần này';
+            } else {
+                button.textContent = item.price + ' 🔥';
+            }
+        };
+
+        setButtonState('buyStreakShieldBtn', 'streakShield');
+        setButtonState('buyMysteryRewardBtn', 'mysteryReward');
+        setButtonState('buyHonorBadgeBtn', 'honorBadge');
+    }
+
+    buyShopItem(itemKey) {
+        if (!appState.isAuthenticated) return;
+
+        this.ensureGamificationState();
+        this.ensureWeeklyShopState();
+
+        const catalog = this.getShopCatalog();
+        const item = catalog[itemKey];
+        if (!item) return;
+
+        const purchases = appState.gamification.shopWeeklySales.purchases || {};
+        const bought = Math.max(0, parseInt(purchases[itemKey], 10) || 0);
+
+        if (bought >= item.weeklyLimit) {
+            alert('🛒 Món này đã hết lượt mua trong tuần, hãy chờ reset tuần sau.');
+            this.renderShopState();
+            return;
+        }
+
+        const currentCoins = Math.max(0, parseInt(appState.gamification.coins, 10) || 0);
+        if (currentCoins < item.price) {
+            alert('🔥 Bạn chưa đủ xu để mua món này.');
+            this.renderShopState();
+            return;
+        }
+
+        appState.gamification.coins = currentCoins - item.price;
+        purchases[itemKey] = bought + 1;
+        appState.gamification.shopWeeklySales.purchases = purchases;
+
+        if (item.inventoryKey) {
+            const inventory = appState.gamification.shopInventory || {};
+            inventory[item.inventoryKey] = Math.max(0, parseInt(inventory[item.inventoryKey], 10) || 0) + 1;
+            appState.gamification.shopInventory = inventory;
+        }
+
+        appState.saveGamificationState();
+        this.renderShopState();
+        this.renderDailyMissions();
+
+        if (itemKey === 'mysteryReward') {
+            const rewards = [
+                'Bạn đang đi đúng hướng, hãy giữ nhịp đều đặn mỗi ngày.',
+                'Mỗi lần chăm sóc sức khỏe là một bước tiến lớn.',
+                'Không cần hoàn hảo, chỉ cần đều đặn và kiên trì.',
+                'Cơ thể khỏe hơn khi bạn quan tâm nó từng ngày.'
+            ];
+            const randomMessage = rewards[Math.floor(Math.random() * rewards.length)];
+            alert('🎁 ' + randomMessage);
+        } else {
+            alert('✅ Đã mua thành công: ' + item.title + '.');
+        }
+
+        this.updateStreakDisplay();
+    }
+
+    getShieldDateSet() {
+        const shieldDates = Array.isArray(appState.gamification.streakShieldUsedDates)
+            ? appState.gamification.streakShieldUsedDates
+            : [];
+        return new Set(shieldDates);
+    }
+
+    tryAutoUseStreakShield(dateSet, today) {
+        if (!appState.isAuthenticated) return '';
+        if (!dateSet || typeof dateSet.has !== 'function') return '';
+
+        this.ensureGamificationState();
+        const inventory = appState.gamification.shopInventory || {};
+        const availableShield = Math.max(0, parseInt(inventory.streakShield, 10) || 0);
+        if (availableShield <= 0) return '';
+
+        const yesterday = new Date(today);
+        yesterday.setDate(yesterday.getDate() - 1);
+        const twoDaysAgo = new Date(today);
+        twoDaysAgo.setDate(twoDaysAgo.getDate() - 2);
+
+        const yesterdayKey = this.formatDateKey(yesterday);
+        const twoDaysAgoKey = this.formatDateKey(twoDaysAgo);
+
+        if (dateSet.has(yesterdayKey)) return '';
+        if (!dateSet.has(twoDaysAgoKey)) return '';
+
+        inventory.streakShield = availableShield - 1;
+        appState.gamification.shopInventory = inventory;
+
+        const usedDates = Array.isArray(appState.gamification.streakShieldUsedDates)
+            ? appState.gamification.streakShieldUsedDates.slice()
+            : [];
+
+        if (usedDates.indexOf(yesterdayKey) === -1) {
+            usedDates.push(yesterdayKey);
+        }
+
+        appState.gamification.streakShieldUsedDates = usedDates;
+        appState.saveGamificationState();
+        dateSet.add(yesterdayKey);
+        return yesterdayKey;
+    }
+
     // ============== LOGIN & AUTH METHODS ==============
     openForgotPasswordModal() {
         const modal = document.getElementById('forgotPasswordModal');
@@ -1855,6 +2641,8 @@ class HealthChatApp {
         if (user) {
             appState.currentUser = user;
             appState.isAuthenticated = true;
+            appState.loadDailyCheckIns();
+            appState.loadGamificationState();
             appState.saveToLocalStorage();
             settingsManager.loadSettings();
             pinManager.loadPins(user.email);
@@ -1865,6 +2653,8 @@ class HealthChatApp {
             const userEmailEl = document.getElementById('userEmail');
             if (userNameEl) userNameEl.textContent = user.name;
             if (userEmailEl) userEmailEl.textContent = user.email;
+            this.streakShopOpen = false;
+            this.toggleStreakShop(false);
             
             this.showInitialChat();
         } else {
@@ -1923,6 +2713,10 @@ class HealthChatApp {
     handleLogout() {
         appState.isAuthenticated = false;
         appState.currentUser = null;
+        appState.dailyCheckIns = [];
+        appState.gamification = appState.getDefaultGamificationState();
+        this.streakShopOpen = false;
+        this.toggleStreakShop(false);
         localStorage.removeItem('currentUser');
         settingsManager.loadSettings();
         chatHistoryManager.loadHistories(null);
@@ -1977,6 +2771,7 @@ class HealthChatApp {
 
     // ============== PAGE NAVIGATION ==============
     goToPage(pageName) {
+        appState.currentPage = pageName;
         document.querySelectorAll('.page').forEach(function(page) { page.classList.remove('active'); });
         
         let pageId = '';
@@ -1984,7 +2779,7 @@ class HealthChatApp {
             case 'chat': pageId = 'chatPage'; break;
             case 'schedule': pageId = 'schedulePage'; break;
             case 'health': pageId = 'healthPage'; break;
-            case 'help': pageId = 'helpPage'; break;
+            case 'streak': pageId = 'streakPage'; break;
             case 'initialChat': pageId = 'initialChatPage'; break;
             case 'login': pageId = 'loginPage'; break;
             case 'signup': pageId = 'signupPage'; break;
@@ -1998,7 +2793,7 @@ class HealthChatApp {
             if (page) page.classList.add('active');
         }
 
-        if (pageName !== 'login' && pageName !== 'signup' && pageName !== 'initialChat' && pageName !== 'settings' && pageName !== 'security' && pageName !== 'stats') {
+        if (pageName !== 'login' && pageName !== 'signup' && pageName !== 'initialChat' && pageName !== 'settings' && pageName !== 'security') {
             this.toggleSidebar(false);
             document.querySelectorAll('.menu-item').forEach(function(item) {
                 item.classList.remove('active');
@@ -2010,8 +2805,13 @@ class HealthChatApp {
 
         if (pageName === 'schedule') {
             this.generateSchedule();
+            this.updateMissionProgress('schedule_open', 1, { skipRender: true });
         } else if (pageName === 'health') {
             this.updateHealthDisplay();
+        } else if (pageName === 'streak') {
+            this.updateStreakDisplay();
+        } else if (pageName === 'stats') {
+            this.initializeStatsPage();
         }
 
         const shouldShowHistoryPanel = appState.isAuthenticated && pageName !== 'login' && pageName !== 'signup';
@@ -2043,11 +2843,59 @@ class HealthChatApp {
     }
 
     // ============== CHAT METHODS ==============
-    sendMainMessage() {
+    getChatSuggestionList() {
+        return [
+            'Để tầm soát biến chứng tiểu đường cần làm gì?',
+            'Tạo thực đơn giảm cân trong 30 ngày giúp mình.',
+            'Các sản phẩm chăm sóc da phù hợp tuổi trung niên là gì?',
+            'Những thực phẩm chức năng nào trẻ em nên bổ sung?'
+        ];
+    }
+
+    getDefaultChatMarkup() {
+        const greeting = '<div class="chat-bubble ai"><p>👋 Xin chào! Hôm nay bạn có chuyện gì muốn nói không?</p></div>';
+        const suggestions = this.getChatSuggestionList().map(function(text) {
+            const escaped = aiEngine.escapeHtml(text);
+            return '<button class="chat-suggestion-btn" data-suggestion="' + escaped + '">' + escaped + '</button>';
+        }).join('');
+        return greeting + '<div class="chat-suggestions" id="chatSuggestions">' + suggestions + '</div>';
+    }
+
+    removeChatSuggestions() {
+        const suggestions = document.getElementById('chatSuggestions');
+        if (suggestions) suggestions.remove();
+    }
+
+    showAiTypingIndicator(chatMessages) {
+        if (!chatMessages) return null;
+        const typingBubble = document.createElement('div');
+        typingBubble.className = 'chat-bubble ai typing';
+        typingBubble.innerHTML =
+            '<p><span class="typing-dots" aria-label="AI đang phản hồi">' +
+            '<span class="typing-dot"></span>' +
+            '<span class="typing-dot"></span>' +
+            '<span class="typing-dot"></span>' +
+            '</span></p>';
+        chatMessages.appendChild(typingBubble);
+        chatMessages.scrollTop = chatMessages.scrollHeight;
+        return typingBubble;
+    }
+
+    hideAiTypingIndicator(typingBubble) {
+        if (typingBubble && typingBubble.parentNode) {
+            typingBubble.parentNode.removeChild(typingBubble);
+        }
+    }
+
+    sendMainMessage(quickMessage) {
         const input = document.getElementById('mainChatInput');
-        const message = input.value.trim();
+        const message = typeof quickMessage === 'string'
+            ? quickMessage.trim()
+            : (input ? input.value.trim() : '');
 
         if (message) {
+            this.removeChatSuggestions();
+            this.checkInToday('chat', { skipRender: true });
             const healthDraftResult = this.tryPrepareHealthDraftFromMessage(message);
             chatHistoryManager.addMessage(message, true);
             this.updateHistoryList();
@@ -2058,19 +2906,18 @@ class HealthChatApp {
             userBubble.innerHTML = '<p>' + aiEngine.escapeHtml(message) + '</p>';
             chatMessages.appendChild(userBubble);
 
-            input.value = '';
+            if (input) input.value = '';
 
-            const loading = document.getElementById('loadingIndicator');
-            if (loading) loading.style.display = 'flex';
+            const typingBubble = this.showAiTypingIndicator(chatMessages);
+            const self = this;
 
             setTimeout(async function() {
-                if (loading) loading.style.display = 'none';
-
                 try {
                     const aiResponse = healthDraftResult ? healthDraftResult.reply : await aiEngine.generateResponseAsync(message);
                     chatHistoryManager.addMessage(aiResponse, false);
                     app.updateHistoryList();
 
+                    self.hideAiTypingIndicator(typingBubble);
                     const aiBubble = document.createElement('div');
                     aiBubble.className = 'chat-bubble ai';
                     aiBubble.innerHTML = '<p>' + aiResponse + '</p>';
@@ -2081,11 +2928,14 @@ class HealthChatApp {
                     const fallbackResponse = aiEngine.generateResponse(message);
                     chatHistoryManager.addMessage(fallbackResponse, false);
                     app.updateHistoryList();
+                    self.hideAiTypingIndicator(typingBubble);
                     const aiBubble = document.createElement('div');
                     aiBubble.className = 'chat-bubble ai';
                     aiBubble.innerHTML = '<p>' + fallbackResponse + '</p>';
                     chatMessages.appendChild(aiBubble);
                     chatMessages.scrollTop = chatMessages.scrollHeight;
+                } finally {
+                    self.hideAiTypingIndicator(typingBubble);
                 }
             }, 800);
 
@@ -2344,48 +3194,6 @@ class HealthChatApp {
         }
     }
 
-    sendHelpMessage() {
-        const input = document.getElementById('helpInput');
-        const message = input.value.trim();
-
-        if (message) {
-            const helpMessages = document.getElementById('helpMessages');
-
-            const userBubble = document.createElement('div');
-            userBubble.className = 'chat-bubble user';
-            userBubble.innerHTML = '<p>' + aiEngine.escapeHtml(message) + '</p>';
-            helpMessages.appendChild(userBubble);
-
-            input.value = '';
-
-            const loading = document.getElementById('helpLoadingIndicator');
-            if (loading) loading.style.display = 'flex';
-
-            setTimeout(async function() {
-                if (loading) loading.style.display = 'none';
-
-                try {
-                    const aiResponse = await aiEngine.generateResponseAsync(message);
-                    const aiBubble = document.createElement('div');
-                    aiBubble.className = 'chat-bubble ai';
-                    aiBubble.innerHTML = '<p>' + aiResponse + '</p>';
-                    helpMessages.appendChild(aiBubble);
-                    helpMessages.scrollTop = helpMessages.scrollHeight;
-                } catch (err) {
-                    console.warn('sendHelpMessage failed:', err);
-                    const fallbackResponse = aiEngine.generateResponse(message);
-                    const aiBubble = document.createElement('div');
-                    aiBubble.className = 'chat-bubble ai';
-                    aiBubble.innerHTML = '<p>' + fallbackResponse + '</p>';
-                    helpMessages.appendChild(aiBubble);
-                    helpMessages.scrollTop = helpMessages.scrollHeight;
-                }
-            }, 800);
-
-            helpMessages.scrollTop = helpMessages.scrollHeight;
-        }
-    }
-
     // ============== SCHEDULE METHODS ==============
     generateSchedule() {
         const schedule = [];
@@ -2475,12 +3283,300 @@ class HealthChatApp {
         }
 
         this.updateHealthHistory();
+        this.updateMissionProgress('health_assessment', 1, { skipRender: true });
+        this.updateStreakDisplay();
         alert('✅ Đánh giá đã lưu!');
     }
 
     updateHealthDisplay() {
         this.updateHealthScorePreviewFromForm();
         this.updateHealthHistory();
+    }
+
+    formatDateKey(date) {
+        return date.getFullYear() + '-' +
+            String(date.getMonth() + 1).padStart(2, '0') + '-' +
+            String(date.getDate()).padStart(2, '0');
+    }
+
+    parseHealthDate(dateText) {
+        if (!dateText) return null;
+        const text = String(dateText).trim();
+        const viDateMatch = text.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/);
+
+        if (viDateMatch) {
+            const day = parseInt(viDateMatch[1], 10);
+            const month = parseInt(viDateMatch[2], 10) - 1;
+            const year = parseInt(viDateMatch[3], 10);
+            const parsed = new Date(year, month, day);
+
+            if (
+                parsed.getFullYear() === year &&
+                parsed.getMonth() === month &&
+                parsed.getDate() === day
+            ) {
+                parsed.setHours(0, 0, 0, 0);
+                return parsed;
+            }
+        }
+
+        const fallback = new Date(text);
+        if (isNaN(fallback.getTime())) return null;
+        fallback.setHours(0, 0, 0, 0);
+        return fallback;
+    }
+
+    getTodayDateKey() {
+        const today = new Date();
+        today.setHours(0, 0, 0, 0);
+        return this.formatDateKey(today);
+    }
+
+    getCompletedStreakDateSet() {
+        const dateSet = new Set();
+        (appState.healthHistory || []).forEach(function(item) {
+            const parsedDate = this.parseHealthDate(item.date);
+            if (parsedDate) dateSet.add(this.formatDateKey(parsedDate));
+        }, this);
+
+        (appState.dailyCheckIns || []).forEach(function(item) {
+            if (item && typeof item.dateKey === 'string' && item.dateKey) {
+                dateSet.add(item.dateKey);
+            }
+        });
+
+        const shieldDates = Array.isArray(appState.gamification && appState.gamification.streakShieldUsedDates)
+            ? appState.gamification.streakShieldUsedDates
+            : [];
+        shieldDates.forEach(function(dateKey) {
+            if (typeof dateKey === 'string' && dateKey) {
+                dateSet.add(dateKey);
+            }
+        });
+
+        return dateSet;
+    }
+
+    checkInToday(source, options) {
+        if (!appState.isAuthenticated) return false;
+        const config = options || {};
+        const todayKey = this.getTodayDateKey();
+        const alreadyChecked = this.getCompletedStreakDateSet().has(todayKey);
+        if (alreadyChecked) return false;
+
+        if (!Array.isArray(appState.dailyCheckIns)) {
+            appState.dailyCheckIns = [];
+        }
+
+        appState.dailyCheckIns.push({
+            dateKey: todayKey,
+            source: typeof source === 'string' && source ? source : 'manual',
+            timestamp: Date.now()
+        });
+        appState.saveToLocalStorage();
+
+        if (!config.skipRender) {
+            this.updateStreakDisplay();
+        }
+
+        return true;
+    }
+
+    handleManualCheckIn() {
+        const added = this.checkInToday('manual', { skipRender: false });
+        if (added) {
+            alert('✅ Điểm danh thành công! Bạn đã hoàn thành điểm danh hôm nay.');
+        } else {
+            alert('ℹ️ Bạn đã điểm danh hôm nay rồi.');
+        }
+    }
+
+    getCurrentStreakDays(dateSet) {
+        if (!dateSet || dateSet.size === 0) return 0;
+
+        const today = new Date();
+        today.setHours(0, 0, 0, 0);
+        const yesterday = new Date(today);
+        yesterday.setDate(yesterday.getDate() - 1);
+
+        let cursor = new Date(today);
+        const todayKey = this.formatDateKey(today);
+        const yesterdayKey = this.formatDateKey(yesterday);
+
+        if (!dateSet.has(todayKey) && dateSet.has(yesterdayKey)) {
+            cursor = new Date(yesterday);
+        }
+
+        let streak = 0;
+        while (dateSet.has(this.formatDateKey(cursor))) {
+            streak += 1;
+            cursor.setDate(cursor.getDate() - 1);
+        }
+
+        return streak;
+    }
+
+    getLongestStreakDays(dateSet) {
+        if (!dateSet || dateSet.size === 0) return 0;
+
+        const sorted = Array.from(dateSet).sort();
+        let longest = 1;
+        let current = 1;
+
+        for (let i = 1; i < sorted.length; i++) {
+            const prevDate = new Date(sorted[i - 1] + 'T00:00:00');
+            const currentDate = new Date(sorted[i] + 'T00:00:00');
+            const diffDays = Math.round((currentDate - prevDate) / (1000 * 60 * 60 * 24));
+
+            if (diffDays === 1) {
+                current += 1;
+                longest = Math.max(longest, current);
+            } else {
+                current = 1;
+            }
+        }
+
+        return longest;
+    }
+
+    getMissedDaysThisMonth(dateSet, today) {
+        const year = today.getFullYear();
+        const month = today.getMonth();
+        let missed = 0;
+
+        for (let day = 1; day <= today.getDate(); day++) {
+            const key = this.formatDateKey(new Date(year, month, day));
+            if (!dateSet.has(key)) missed += 1;
+        }
+
+        return missed;
+    }
+
+    renderStreakCalendar(dateSet, today, shieldDateSet) {
+        const grid = document.getElementById('streakCalendarGrid');
+        const monthLabel = document.getElementById('streakMonthLabel');
+        if (!grid || !monthLabel) return;
+
+        const year = today.getFullYear();
+        const month = today.getMonth();
+        const firstDay = new Date(year, month, 1);
+        const daysInMonth = new Date(year, month + 1, 0).getDate();
+        // Chuyen sang lich bat dau tu thu Hai.
+        const leading = (firstDay.getDay() + 6) % 7;
+
+        monthLabel.textContent = 'T' + (month + 1) + ' ' + year;
+
+        const weekdays = ['T2', 'T3', 'T4', 'T5', 'T6', 'T7', 'CN'];
+        const cells = [];
+
+        weekdays.forEach(function(weekday) {
+            cells.push('<div class="streak-weekday">' + weekday + '</div>');
+        });
+
+        for (let i = 0; i < leading; i++) {
+            cells.push('<div class="streak-day empty"></div>');
+        }
+
+        for (let day = 1; day <= daysInMonth; day++) {
+            const currentDate = new Date(year, month, day);
+            currentDate.setHours(0, 0, 0, 0);
+
+            const classes = ['streak-day'];
+            const key = this.formatDateKey(currentDate);
+            const isToday = currentDate.getTime() === today.getTime();
+            const isShieldProtected = shieldDateSet && shieldDateSet.has && shieldDateSet.has(key);
+
+            if (currentDate > today) {
+                classes.push('future');
+            } else if (isToday) {
+                classes.push('today');
+            } else if (isShieldProtected) {
+                classes.push('shield');
+            } else if (dateSet.has(key)) {
+                classes.push('done');
+            } else {
+                classes.push('missed');
+            }
+
+            cells.push('<div class="' + classes.join(' ') + '">' + day + '</div>');
+        }
+
+        grid.innerHTML = cells.join('');
+    }
+
+    updateStreakAchievements(longestStreak) {
+        document.querySelectorAll('#streakAchievementGrid .streak-achievement-card').forEach(function(card) {
+            const threshold = parseInt(card.getAttribute('data-threshold'), 10) || 0;
+            card.classList.toggle('unlocked', longestStreak >= threshold);
+        });
+    }
+
+    updateStreakDisplay() {
+        const streakPage = document.getElementById('streakPage');
+        if (!streakPage) return;
+
+        this.ensureGamificationState();
+
+        const today = new Date();
+        today.setHours(0, 0, 0, 0);
+        const todayKey = this.formatDateKey(today);
+
+        const dateSet = this.getCompletedStreakDateSet();
+        const autoShieldDate = this.tryAutoUseStreakShield(dateSet, today);
+        const shieldDateSet = this.getShieldDateSet();
+        const currentStreak = this.getCurrentStreakDays(dateSet);
+        const longestStreak = this.getLongestStreakDays(dateSet);
+        const totalRecords = dateSet.size;
+        const missedThisMonth = this.getMissedDaysThisMonth(dateSet, today);
+        const checkedInToday = dateSet.has(todayKey);
+        const yesterday = new Date(today);
+        yesterday.setDate(yesterday.getDate() - 1);
+        const usedShieldYesterday = shieldDateSet.has(this.formatDateKey(yesterday));
+
+        const currentEl = document.getElementById('streakCurrentDays');
+        const subtextEl = document.getElementById('streakHeroSubtext');
+        const totalEl = document.getElementById('streakTotalRecords');
+        const longestEl = document.getElementById('streakLongestDays');
+        const missEl = document.getElementById('streakMissDays');
+        const checkInBtn = document.getElementById('checkInTodayBtn');
+        const checkInStatus = document.getElementById('checkInTodayStatus');
+
+        if (currentEl) currentEl.textContent = String(currentStreak);
+        if (totalEl) totalEl.textContent = String(totalRecords);
+        if (longestEl) longestEl.textContent = String(longestStreak);
+        if (missEl) missEl.textContent = String(missedThisMonth);
+        if (checkInBtn) {
+            checkInBtn.disabled = checkedInToday;
+            checkInBtn.textContent = checkedInToday ? '✅ Đã điểm danh hôm nay' : '✅ Điểm danh hôm nay';
+        }
+        if (checkInStatus) {
+            if (checkedInToday) {
+                checkInStatus.textContent = usedShieldYesterday
+                    ? 'Hôm nay đã điểm danh. Khiên đã bảo vệ chuỗi cho hôm qua.'
+                    : 'Hôm nay đã điểm danh (bằng nút hoặc tự động khi chat). Chỉ 1 lần/ngày.';
+            } else {
+                checkInStatus.textContent = usedShieldYesterday
+                    ? 'Bạn chưa điểm danh hôm nay. Chuỗi hôm qua đã được khiên bảo vệ.'
+                    : 'Bạn chưa điểm danh hôm nay.';
+            }
+        }
+
+        if (subtextEl) {
+            if (autoShieldDate) {
+                subtextEl.textContent = 'Khiên chuỗi đã tự kích hoạt để bảo vệ ngày bỏ lỡ hôm qua.';
+            } else if (checkedInToday && currentStreak > 0) {
+                subtextEl.textContent = 'Tuyệt vời! Hôm nay bạn đã điểm danh và giữ chuỗi liên tục.';
+            } else if (currentStreak > 0) {
+                subtextEl.textContent = 'Bạn đang duy trì rất tốt. Cố gắng giữ nhịp mỗi ngày.';
+            } else {
+                subtextEl.textContent = 'Điểm danh hôm nay để bắt đầu chuỗi mới.';
+            }
+        }
+
+        this.renderDailyMissions();
+        this.renderShopState();
+        this.renderStreakCalendar(dateSet, today, shieldDateSet);
+        this.updateStreakAchievements(longestStreak);
     }
 
     updateHealthHistory() {
@@ -2524,6 +3620,7 @@ class HealthChatApp {
         appState.healthHistory.reverse();
         appState.saveToLocalStorage();
         this.updateHealthHistory();
+        this.updateStreakDisplay();
     }
 
     clearAllHistory() {
@@ -2531,6 +3628,7 @@ class HealthChatApp {
             appState.healthHistory = [];
             appState.saveToLocalStorage();
             this.updateHealthHistory();
+            this.updateStreakDisplay();
             alert('✅ Đã xóa tất cả!');
         }
     }
@@ -2804,106 +3902,123 @@ class HealthChatApp {
 
     // ============== STATISTICS PAGE ==============
     initializeStatsPage() {
-        const allHistory = appState.healthHistory || [];
-
-        const score10FromItem = function(item) {
-            if (typeof item.score === 'number' && isFinite(item.score)) {
-                return Math.max(0, Math.min(10, item.score / 10));
-            }
-
-        const defs = [
-                { key: 'energy', invert: false },
-                { key: 'sleep', invert: false },
-                { key: 'mood', invert: false },
-                { key: 'stress', invert: false },
-                { key: 'hunger', invert: false }
-            ];
-            const enabledMap = item.metricsEnabled || {};
-            let total = 0;
-            let count = 0;
-            defs.forEach(function(def) {
-                if (enabledMap[def.key] === false) return;
-                const raw = Number(item[def.key]);
-                if (!isFinite(raw)) return;
-                total += def.invert ? (11 - raw) : raw;
-                count += 1;
-            });
-
-            if (count === 0) return 0;
-            return Math.max(0, Math.min(10, total / count));
+        const allHistory = Array.isArray(appState.healthHistory) ? appState.healthHistory : [];
+        const rangeDays = Math.max(1, Number(this.currentFilterDays) || 1);
+        const rangeLabelMap = {
+            1: '1 ngày',
+            3: '3 ngày',
+            7: '1 tuần',
+            30: '1 tháng',
+            180: '6 tháng',
+            365: '1 năm'
         };
 
-        const averageMetric = function(list, metricKey) {
-            const values = list.filter(function(item) {
+        const metricDefs = [
+            { key: 'energy', label: 'Cảm Giác Năng Lượng', shortLabel: 'Năng lượng', color: '#4F8EF7' },
+            { key: 'sleep', label: 'Chất Lượng Giấc Ngủ', shortLabel: 'Giấc ngủ', color: '#45C777' },
+            { key: 'mood', label: 'Tâm Trạng', shortLabel: 'Tâm trạng', color: '#F59E0B' },
+            { key: 'stress', label: 'Thư Giãn', shortLabel: 'Thư giãn', color: '#8B5CF6' },
+            { key: 'hunger', label: 'Cơn Đói', shortLabel: 'Cơn đói', color: '#EF4444' }
+        ];
+
+        const today = new Date();
+        today.setHours(0, 0, 0, 0);
+        const startDate = new Date(today);
+        startDate.setDate(startDate.getDate() - (rangeDays - 1));
+
+        const parseDate = function(item) {
+            return this.parseHealthDate(item && item.date ? item.date : '');
+        }.bind(this);
+
+        const filtered = allHistory.filter(function(item) {
+            const itemDate = parseDate(item);
+            return !!itemDate && itemDate >= startDate && itemDate <= today;
+        });
+
+        const getMetricValues = function(metricKey) {
+            return filtered.filter(function(item) {
                 return !(item.metricsEnabled && item.metricsEnabled[metricKey] === false);
             }).map(function(item) {
                 return Number(item[metricKey]);
             }).filter(function(value) {
                 return isFinite(value);
             });
-
-            if (values.length === 0) return '--';
-            return (values.reduce(function(sum, value) { return sum + value; }, 0) / values.length).toFixed(1);
         };
 
-        const avgScoreEl = document.getElementById('avgScore');
-        if (allHistory.length === 0) {
-            if (avgScoreEl) avgScoreEl.textContent = '--/10';
-            document.getElementById('avgEnergy').textContent = '0';
-            document.getElementById('avgSleep').textContent = '0';
-            document.getElementById('avgMood').textContent = '0';
-            document.getElementById('avgStress').textContent = '0';
-            document.getElementById('avgHunger').textContent = '0';
-            document.getElementById('detailedStats').innerHTML = '<p style="text-align: center; color: var(--text-secondary);">Không có dữ liệu</p>';
-            return;
+        const metricStats = metricDefs.map(function(metric) {
+            const values = getMetricValues(metric.key);
+            const avg = values.length > 0
+                ? values.reduce(function(sum, value) { return sum + value; }, 0) / values.length
+                : 0;
+
+            return {
+                key: metric.key,
+                label: metric.label,
+                shortLabel: metric.shortLabel,
+                color: metric.color,
+                avg: avg,
+                count: values.length
+            };
+        });
+
+        const validMetricStats = metricStats.filter(function(metric) { return metric.count > 0; });
+        const overallAverage = validMetricStats.length > 0
+            ? validMetricStats.reduce(function(sum, metric) { return sum + metric.avg; }, 0) / validMetricStats.length
+            : 0;
+
+        const setText = function(id, value) {
+            const el = document.getElementById(id);
+            if (el) el.textContent = value;
+        };
+
+        setText('statsTotalSessions', String(filtered.length));
+        setText('statsOverallAvg', filtered.length > 0 ? overallAverage.toFixed(1) + '/10' : '--/10');
+        setText('statsRangeInfo', rangeLabelMap[rangeDays] || (rangeDays + ' ngày'));
+
+        const metricChart = document.getElementById('metricAvgChart');
+        if (metricChart) {
+            if (filtered.length === 0) {
+                metricChart.innerHTML = '<div class="stats-empty">Không có dữ liệu cho bộ lọc hiện tại.</div>';
+            } else {
+                metricChart.innerHTML = metricStats.map(function(metric) {
+                    const percentage = Math.max(0, Math.min(100, metric.avg * 10));
+                    const visibleHeight = metric.count > 0 ? Math.max(8, percentage) : 0;
+
+                    return '<div class="metric-bar-item" title="' + metric.label + ': ' + metric.avg.toFixed(1) + '/10">' +
+                        '<div class="metric-bar-track">' +
+                        '<div class="metric-bar-fill" style="height: ' + visibleHeight.toFixed(1) + '%; background: ' + metric.color + ';">' +
+                        '<small>' + (metric.count > 0 ? metric.avg.toFixed(1) : '--') + '</small>' +
+                        '</div>' +
+                        '</div>' +
+                        '<div class="metric-label">' + metric.shortLabel + '</div>' +
+                        '</div>';
+                }).join('');
+            }
         }
 
-        // Điểm sức khỏe trung bình: gom toàn bộ đánh giá theo ngày, lấy TB từng ngày rồi TB toàn bộ ngày.
-        const groupedByDate = {};
-        allHistory.forEach(function(item) {
-            const key = item.date || 'Không rõ ngày';
-            if (!groupedByDate[key]) groupedByDate[key] = [];
-            groupedByDate[key].push(score10FromItem(item));
-        });
-        const dailyAverages = Object.keys(groupedByDate).map(function(day) {
-            const values = groupedByDate[day];
-            return values.reduce(function(sum, value) { return sum + value; }, 0) / values.length;
-        });
-        const avgScore = (dailyAverages.reduce(function(sum, value) { return sum + value; }, 0) / dailyAverages.length).toFixed(1);
-        if (avgScoreEl) avgScoreEl.textContent = avgScore + '/10';
-
-        const filtered = appState.healthHistory.filter(function(item) {
-            const itemDate = new Date(item.date.split('/').reverse().join('-'));
-            const daysAgo = new Date();
-            daysAgo.setDate(daysAgo.getDate() - this.currentFilterDays);
-            return itemDate >= daysAgo;
-        }.bind(this));
+        const detailBody = document.getElementById('statsDetailBody');
+        if (!detailBody) return;
 
         if (filtered.length === 0) {
-            document.getElementById('detailedStats').innerHTML = '<p style="text-align: center; color: var(--text-secondary);">Không có dữ liệu</p>';
-            document.getElementById('avgEnergy').textContent = '0';
-            document.getElementById('avgSleep').textContent = '0';
-            document.getElementById('avgMood').textContent = '0';
-            document.getElementById('avgStress').textContent = '0';
-            document.getElementById('avgHunger').textContent = '0';
+            detailBody.innerHTML = '<tr><td colspan="4" class="stats-empty">Không có dữ liệu cho bộ lọc hiện tại.</td></tr>';
             return;
         }
 
-        const avgEnergy = averageMetric(filtered, 'energy');
-        const avgSleep = averageMetric(filtered, 'sleep');
-        const avgMood = averageMetric(filtered, 'mood');
-        const avgStress = averageMetric(filtered, 'stress');
-        const avgHunger = averageMetric(filtered, 'hunger');
+        const levelFromAverage = function(avg, count) {
+            if (count === 0) return 'Chưa có dữ liệu';
+            if (avg >= 8) return 'Tốt';
+            if (avg >= 6.5) return 'Khá';
+            if (avg >= 5) return 'Trung bình';
+            return 'Cần cải thiện';
+        };
 
-        document.getElementById('avgEnergy').textContent = avgEnergy;
-        document.getElementById('avgSleep').textContent = avgSleep;
-        document.getElementById('avgMood').textContent = avgMood;
-        document.getElementById('avgStress').textContent = avgStress;
-        document.getElementById('avgHunger').textContent = avgHunger;
-
-        const detailedStats = document.getElementById('detailedStats');
-        detailedStats.innerHTML = filtered.map(function(item) {
-            return '<div class="detailed-stat"><strong>' + item.date + '</strong> - Điểm: <strong>' + score10FromItem(item).toFixed(1) + '/10</strong></div>';
+        detailBody.innerHTML = metricStats.map(function(metric) {
+            return '<tr>' +
+                '<td><strong>' + metric.label + '</strong></td>' +
+                '<td>' + (metric.count > 0 ? metric.avg.toFixed(1) + '/10' : '--') + '</td>' +
+                '<td>' + metric.count + '</td>' +
+                '<td>' + levelFromAverage(metric.avg, metric.count) + '</td>' +
+                '</tr>';
         }).join('');
     }
 
@@ -2913,7 +4028,7 @@ class HealthChatApp {
         this.goToPage('chat');
         const chatMessages = document.getElementById('chatMessages');
         if (chatMessages) {
-            chatMessages.innerHTML = '<div class="chat-bubble ai"><p>👋 Xin chào! Hôm nay bạn có chuyện gì muốn nói không?</p></div>';
+            chatMessages.innerHTML = this.getDefaultChatMarkup();
         }
         this.updateHistoryList();
     }

@@ -16,7 +16,8 @@
             <button class="menu-item active" data-page="chat">💬 Trò Chuyện</button>
             <button class="menu-item" data-page="schedule">📅 Thời Khóa Biểu</button>
             <button class="menu-item" data-page="health">❤️ Đánh Giá Sức Khỏe</button>
-            <button class="menu-item" data-page="help">🆘 Giúp Đỡ</button>
+            <button class="menu-item" data-page="streak">🔥 Chuỗi ngày</button>
+            <button class="menu-item" data-page="stats">📊 Thống Kê</button>
         </div>
     </div>
 
@@ -140,7 +141,6 @@
                     </div>
                     <hr>
                     <button class="profile-menu-item" id="settingsBtn">⚙️ Cài Đặt</button>
-                    <button class="profile-menu-item" id="statsBtn">📊 Thống Kê</button>
                     <button class="profile-menu-item" id="securityBtn">🔒 Bảo Mật</button>
                     <hr>
                     <button class="profile-menu-item logout-btn" id="logoutBtn">🚪 Đăng Xuất</button>
@@ -224,6 +224,12 @@
                     <div class="chat-messages" id="chatMessages">
                         <div class="chat-bubble ai">
                             <p>👋 Xin chào! Hôm nay bạn có chuyện gì muốn nói không?</p>
+                        </div>
+                        <div class="chat-suggestions" id="chatSuggestions">
+                            <button class="chat-suggestion-btn" data-suggestion="Để tầm soát biến chứng tiểu đường cần làm gì?">Để tầm soát biến chứng tiểu đường cần làm gì?</button>
+                            <button class="chat-suggestion-btn" data-suggestion="Tạo thực đơn giảm cân trong 30 ngày giúp mình.">Tạo thực đơn giảm cân trong 30 ngày.</button>
+                            <button class="chat-suggestion-btn" data-suggestion="Các sản phẩm chăm sóc da phù hợp tuổi trung niên là gì?">Các sản phẩm chăm sóc da cho tuổi trung niên?</button>
+                            <button class="chat-suggestion-btn" data-suggestion="Những thực phẩm chức năng nào trẻ em nên bổ sung?">Thực phẩm chức năng cho trẻ em nên bổ sung gì?</button>
                         </div>
                     </div>
                     <div class="chat-input-area">
@@ -351,22 +357,132 @@
                 </div>
             </section>
 
-            <!-- Help Page -->
-            <section id="helpPage" class="page">
-                <div class="help-container">
-                    <h2>🆘 Trung Tâm Hỗ Trợ</h2>
-                    <div class="help-chat-container">
-                        <div class="help-messages" id="helpMessages">
-                            <div class="chat-bubble ai">
-                                <p>👋 Chào bạn! Tôi có thể giúp bạn về sức khỏe, dinh dưỡng, hoặc lịch trình.</p>
+            <!-- Streak Page -->
+            <section id="streakPage" class="page">
+                <div class="streak-container">
+                    <h2>🔥 Chuỗi ngày</h2>
+
+                    <div class="streak-hero-card">
+                        <div class="streak-hero-icon">🔥</div>
+                        <div class="streak-hero-value" id="streakCurrentDays">0</div>
+                        <div class="streak-hero-label">NGÀY CHUỖI</div>
+                        <p id="streakHeroSubtext">Điểm danh hôm nay để nối chuỗi.</p>
+                        <div class="streak-checkin-row">
+                            <button type="button" class="streak-checkin-btn" id="checkInTodayBtn">✅ Điểm danh hôm nay</button>
+                            <small id="checkInTodayStatus">Bạn chưa điểm danh hôm nay.</small>
+                        </div>
+                    </div>
+
+                    <div class="streak-stat-grid">
+                        <div class="streak-stat-card">
+                            <span class="streak-stat-icon">📘</span>
+                            <strong id="streakTotalRecords">0</strong>
+                            <small>Lịch sử</small>
+                        </div>
+                        <div class="streak-stat-card">
+                            <span class="streak-stat-icon">🏆</span>
+                            <strong id="streakLongestDays">0</strong>
+                            <small>Chuỗi dài nhất</small>
+                        </div>
+                        <div class="streak-stat-card">
+                            <span class="streak-stat-icon">❄️</span>
+                            <strong id="streakMissDays">0</strong>
+                            <small>Ngày nghỉ tháng này</small>
+                        </div>
+                    </div>
+
+                    <div class="streak-toolbar">
+                        <button type="button" class="streak-open-shop-btn" id="toggleShopBtn">🛒 Vào cửa hàng</button>
+                        <div class="streak-coin-pill">🔥 <strong id="coinBalance">0</strong> xu</div>
+                    </div>
+
+                    <section class="streak-mission-card">
+                        <div class="streak-section-head">
+                            <h3>🎯 Nhiệm vụ hằng ngày</h3>
+                            <small id="missionDateLabel"></small>
+                        </div>
+                        <div id="dailyMissionList"></div>
+                    </section>
+
+                    <section class="streak-shop-card hidden" id="streakShopCard">
+                        <div class="streak-section-head">
+                            <h3>🛒 Cửa Hàng</h3>
+                            <small id="shopResetInfo">Reset mỗi tuần</small>
+                        </div>
+
+                        <div class="shop-item">
+                            <div class="shop-item-left">
+                                <span class="shop-item-icon">❄️</span>
+                                <div>
+                                    <strong>Đóng băng chuỗi</strong>
+                                    <p>Giữ chuỗi khi bỏ lỡ 1 ngày điểm danh.</p>
+                                    <small>Đang có: <span id="shopShieldOwned">0</span></small>
+                                </div>
                             </div>
+                            <button type="button" class="shop-buy-btn" id="buyStreakShieldBtn">10 🔥</button>
                         </div>
-                        <div class="chat-input-area">
-                            <input type="text" id="helpInput" placeholder="Hỏi câu hỏi của bạn...">
-                            <button class="send-btn" id="helpSendBtn">➤</button>
+
+                        <div class="shop-item">
+                            <div class="shop-item-left">
+                                <span class="shop-item-icon">🎁</span>
+                                <div>
+                                    <strong>Phần thưởng bí ẩn</strong>
+                                    <p>Nhận một thông điệp đặc biệt.</p>
+                                </div>
+                            </div>
+                            <button type="button" class="shop-buy-btn" id="buyMysteryRewardBtn">15 🔥</button>
                         </div>
-                        <div class="loading" id="helpLoadingIndicator" style="display: none;">
-                            <span></span><span></span><span></span>
+
+                        <div class="shop-item">
+                            <div class="shop-item-left">
+                                <span class="shop-item-icon">🏅</span>
+                                <div>
+                                    <strong>Huy hiệu danh dự</strong>
+                                    <p>Mở khóa huy hiệu sưu tầm.</p>
+                                    <small>Đang có: <span id="shopHonorBadgeOwned">0</span></small>
+                                </div>
+                            </div>
+                            <button type="button" class="shop-buy-btn" id="buyHonorBadgeBtn">30 🔥</button>
+                        </div>
+                    </section>
+
+                    <div class="streak-calendar-card">
+                        <div class="streak-calendar-head">
+                            <h3>📅 Lịch sử</h3>
+                            <span id="streakMonthLabel"></span>
+                        </div>
+                        <div class="streak-calendar-grid" id="streakCalendarGrid"></div>
+                        <div class="streak-legend">
+                            <span><i class="legend-dot done"></i> Đã điểm danh</span>
+                            <span><i class="legend-dot shield"></i> Đóng băng chuỗi</span>
+                            <span><i class="legend-dot missed"></i> Nghỉ</span>
+                            <span><i class="legend-dot today"></i> Hôm nay</span>
+                        </div>
+                    </div>
+
+                    <div class="streak-achievement-card-wrap">
+                        <h3>🏅 Thành tựu</h3>
+                        <div class="streak-achievement-grid" id="streakAchievementGrid">
+                            <div class="streak-achievement-card" data-threshold="1">
+                                <span class="achievement-icon">🔥</span>
+                                <strong>Khởi động</strong>
+                                <small>Chuỗi 1 ngày</small>
+                            </div>
+                            <div class="streak-achievement-card" data-threshold="7">
+                                <span class="achievement-icon">⭐</span>
+                                <strong>7 ngày</strong>
+                                <small>Chuỗi 1 tuần</small>
+                            </div>
+                            <div class="streak-achievement-card" data-threshold="30">
+                                <span class="achievement-icon">💪</span>
+                                <strong>30 ngày</strong>
+                                <small>Chuỗi 1 tháng</small>
+                            </div>
+                            <div class="streak-achievement-card" data-threshold="100">
+                                <span class="achievement-icon">🏆</span>
+                                <strong>100 ngày</strong>
+                                <small>Chuỗi bền bỉ</small>
+                            </div>
                         </div>
                     </div>
                 </div>
@@ -486,52 +602,67 @@
                 <div class="stats-container">
                     <div class="stats-header">
                         <button class="back-btn" id="backFromStats">← Quay Lại</button>
-                        <h2>📊 Thống Kê Sức Khỏe</h2>
+                        <h2>📊 Phân Tích</h2>
                     </div>
 
                     <div class="time-filter">
                         <button type="button" class="filter-btn active" data-days="1">1 Ngày</button>
                         <button type="button" class="filter-btn" data-days="3">3 Ngày</button>
-                        <button type="button" class="filter-btn" data-days="7">7 Ngày</button>
+                        <button type="button" class="filter-btn" data-days="7">1 Tuần</button>
                         <button type="button" class="filter-btn" data-days="30">1 Tháng</button>
+                        <button type="button" class="filter-btn" data-days="180">6 Tháng</button>
                         <button type="button" class="filter-btn" data-days="365">1 Năm</button>
                     </div>
 
-                    <div class="stats-content">
-                        <div class="stat-card">
-                            <h3>📈 Điểm Sức Khỏe Trung Bình (/10)</h3>
-                            <div class="stat-value" id="avgScore">--/10</div>
-                        </div>
+                    <div class="analytics-wrap">
+                        <section class="analytics-panel analytics-panel-kpi">
+                            <h3>📊 Tổng Quan</h3>
+                            <div class="analytics-kpi-grid">
+                                <div class="analytics-kpi-card">
+                                    <div class="kpi-icon">📝</div>
+                                    <div class="kpi-text">
+                                        <span>Tổng lần đánh giá</span>
+                                        <strong id="statsTotalSessions">0</strong>
+                                    </div>
+                                </div>
+                                <div class="analytics-kpi-card">
+                                    <div class="kpi-icon">📈</div>
+                                    <div class="kpi-text">
+                                        <span>Điểm TB tổng</span>
+                                        <strong id="statsOverallAvg">--/10</strong>
+                                    </div>
+                                </div>
+                                <div class="analytics-kpi-card">
+                                    <div class="kpi-icon">🗓️</div>
+                                    <div class="kpi-text">
+                                        <span>Khoảng lọc</span>
+                                        <strong id="statsRangeInfo">1 ngày</strong>
+                                    </div>
+                                </div>
+                            </div>
+                        </section>
 
-                        <div class="stat-card">
-                            <h3>💪 Năng Lượng Trung Bình</h3>
-                            <div class="stat-value" id="avgEnergy">0</div>
-                        </div>
+                        <section class="analytics-panel">
+                            <h3>📊 Biểu Đồ Điểm Trung Bình (1/10)</h3>
+                            <div class="metric-chart" id="metricAvgChart"></div>
+                        </section>
 
-                        <div class="stat-card">
-                            <h3>😴 Giấc Ngủ Trung Bình</h3>
-                            <div class="stat-value" id="avgSleep">0</div>
-                        </div>
-
-                        <div class="stat-card">
-                            <h3>😊 Tâm Trạng Trung Bình</h3>
-                            <div class="stat-value" id="avgMood">0</div>
-                        </div>
-
-                        <div class="stat-card">
-                            <h3>😌 Thư Giãn Trung Bình</h3>
-                            <div class="stat-value" id="avgStress">0</div>
-                        </div>
-
-                        <div class="stat-card">
-                            <h3>🍽️ Cơn Đói Trung Bình</h3>
-                            <div class="stat-value" id="avgHunger">0</div>
-                        </div>
-                    </div>
-
-                    <div class="stats-chart">
-                        <h3>📋 Chi Tiết Theo Ngày</h3>
-                        <div id="detailedStats"></div>
+                        <section class="analytics-panel">
+                            <h3>📋 Chi Tiết</h3>
+                            <div class="details-table-wrap">
+                                <table class="details-table">
+                                    <thead>
+                                        <tr>
+                                            <th>Chỉ số sức khỏe</th>
+                                            <th>Điểm TB (/10)</th>
+                                            <th>Số lần ghi nhận</th>
+                                            <th>Mức đánh giá</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody id="statsDetailBody"></tbody>
+                                </table>
+                            </div>
+                        </section>
                     </div>
                 </div>
             </section>
