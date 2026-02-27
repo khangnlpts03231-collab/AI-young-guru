@@ -1047,7 +1047,7 @@ class AIEngine {
             '😊 Chào bạn! Rất vui được gặp bạn. Hôm nay tôi có thể giúp gì?',
             '👋 Hi! Tôi ở đây để hỗ trợ sức khỏe của bạn.',
             '🌟 Chào! Hôm nay bạn cảm thấy thế nào?',
-            '💚 Xin chào bạn! Mình là Heath Student AI. Bạn có vấn đề gì không?'
+            '💚 Xin chào bạn! Mình là Student Health AI. Bạn có vấn đề gì không?'
         ];
         return this.getRandomElement(greetings);
     }
