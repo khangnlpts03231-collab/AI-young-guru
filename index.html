@@ -3,10 +3,14 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>HealthChat - Trợ Lý Sức Khỏe Cá Nhân</title>
+    <title>Heath Student AI - Trợ Lý Sức Khỏe Cá Nhân</title>
+    <link href="https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght@0,9..144,300;0,9..144,400;0,9..144,700;1,9..144,300;1,9..144,600&family=DM+Sans:wght@300;400;500&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="styles.css">
 </head>
 <body>
+    <div class="cursor" id="cur"></div>
+    <div class="cursor-ring" id="curR"></div>
+
     <!-- Sidebar Menu -->
     <div class="sidebar" id="sidebar">
         <button class="close-btn" id="closeSidebar">✕</button>
@@ -126,7 +130,7 @@
         <!-- Header -->
         <header class="header">
             <button class="menu-toggle" id="menuToggle">☰</button>
-            <h1>HealthChat</h1>
+            <h1 id="appBrandHome" title="Về trang giới thiệu">Heath Student AI</h1>
             <div class="profile-container">
                 <button class="avatar-btn" id="avatarBtn">
                     <img src="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='150' height='150' viewBox='0 0 150 150'%3E%3Crect width='150' height='150' fill='%23bdbdbd'/%3E%3Ccircle cx='75' cy='48' r='30' fill='%23f2f2f2'/%3E%3Cpath d='M20 150a55 55 0 0 1 110 0Z' fill='%23f2f2f2'/%3E%3C/svg%3E" alt="Avatar" class="avatar" id="avatarImg">
@@ -155,7 +159,7 @@
                 <div class="auth-container">
                     <div class="auth-content">
                         <h2>Đăng Nhập</h2>
-                        <div class="demo-info">
+                        <div class="demo-info" id="demoQuickLoginBox" role="button" tabindex="0" aria-label="Đăng nhập nhanh bằng tài khoản demo">
                             💡 <strong>Tài khoản demo:</strong><br>
                             Email: <code>demo@healthchat.com</code><br>
                             Mật khẩu: <code>123456</code>
@@ -174,6 +178,9 @@
                         <p>Chưa có tài khoản? <button type="button" class="link-btn" id="switchToSignup">Đăng Ký Ngay</button></p>
                         <p style="margin-top: 10px;">
                             <button type="button" class="link-btn" id="forgotPasswordLink">Quên Mật Khẩu?</button>
+                        </p>
+                        <p style="margin-top: 6px;">
+                            <a href="intro.html" class="link-btn">Xem Trang Giới Thiệu</a>
                         </p>
                     </div>
                 </div>
@@ -204,6 +211,9 @@
                             <button type="submit" class="btn btn-primary">Đăng Ký</button>
                         </form>
                         <p>Đã có tài khoản? <button type="button" class="link-btn" id="switchToLogin">Đăng Nhập</button></p>
+                        <p style="margin-top: 6px;">
+                            <a href="intro.html" class="link-btn">Xem Trang Giới Thiệu</a>
+                        </p>
                         <div class="success-message" id="signupSuccess" style="display: none;">
                             ✅ Đăng ký thành công! Hãy đăng nhập để tiếp tục.
                         </div>
@@ -393,7 +403,7 @@
 
                     <div class="streak-toolbar">
                         <button type="button" class="streak-open-shop-btn" id="toggleShopBtn">🛒 Vào cửa hàng</button>
-                        <div class="streak-coin-pill">🔥 <strong id="coinBalance">0</strong> xu</div>
+                        <div class="streak-coin-pill">🪙 <strong id="coinBalance">0</strong> xu</div>
                     </div>
 
                     <section class="streak-mission-card">
@@ -419,18 +429,7 @@
                                     <small>Đang có: <span id="shopShieldOwned">0</span></small>
                                 </div>
                             </div>
-                            <button type="button" class="shop-buy-btn" id="buyStreakShieldBtn">10 🔥</button>
-                        </div>
-
-                        <div class="shop-item">
-                            <div class="shop-item-left">
-                                <span class="shop-item-icon">🎁</span>
-                                <div>
-                                    <strong>Phần thưởng bí ẩn</strong>
-                                    <p>Nhận một thông điệp đặc biệt.</p>
-                                </div>
-                            </div>
-                            <button type="button" class="shop-buy-btn" id="buyMysteryRewardBtn">15 🔥</button>
+                            <button type="button" class="shop-buy-btn" id="buyStreakShieldBtn">10 🪙</button>
                         </div>
 
                         <div class="shop-item">
@@ -442,14 +441,18 @@
                                     <small>Đang có: <span id="shopHonorBadgeOwned">0</span></small>
                                 </div>
                             </div>
-                            <button type="button" class="shop-buy-btn" id="buyHonorBadgeBtn">30 🔥</button>
+                            <button type="button" class="shop-buy-btn" id="buyHonorBadgeBtn">30 🪙</button>
                         </div>
                     </section>
 
                     <div class="streak-calendar-card">
                         <div class="streak-calendar-head">
                             <h3>📅 Lịch sử</h3>
-                            <span id="streakMonthLabel"></span>
+                            <div class="streak-month-nav">
+                                <button type="button" class="streak-month-btn" id="streakPrevMonthBtn" aria-label="Xem tháng trước">‹</button>
+                                <span id="streakMonthLabel"></span>
+                                <button type="button" class="streak-month-btn" id="streakNextMonthBtn" aria-label="Xem tháng sau">›</button>
+                            </div>
                         </div>
                         <div class="streak-calendar-grid" id="streakCalendarGrid"></div>
                         <div class="streak-legend">
@@ -464,7 +467,7 @@
                         <h3>🏅 Thành tựu</h3>
                         <div class="streak-achievement-grid" id="streakAchievementGrid">
                             <div class="streak-achievement-card" data-threshold="1">
-                                <span class="achievement-icon">🔥</span>
+                                <span class="achievement-icon">🪙</span>
                                 <strong>Khởi động</strong>
                                 <small>Chuỗi 1 ngày</small>
                             </div>
@@ -482,6 +485,11 @@
                                 <span class="achievement-icon">🏆</span>
                                 <strong>100 ngày</strong>
                                 <small>Chuỗi bền bỉ</small>
+                            </div>
+                            <div class="streak-achievement-card" data-achievement="honor_badge">
+                                <span class="achievement-icon">🏅</span>
+                                <strong>Nhà sưu tầm</strong>
+                                <small>Mua huy hiệu danh dự</small>
                             </div>
                         </div>
                     </div>
@@ -539,7 +547,7 @@
                             <div class="color-selector">
                                 <label>Chọn Màu Chủ Đề:</label>
                                 <div class="color-options">
-                                    <button type="button" class="color-btn" data-color="#4CAF50" title="Xanh lá"></button>
+                                    <button type="button" class="color-btn" data-color="#00C98D" title="Xanh intro"></button>
                                     <button type="button" class="color-btn" data-color="#2196F3" title="Xanh dương"></button>
                                     <button type="button" class="color-btn" data-color="#FF9800" title="Cam"></button>
                                     <button type="button" class="color-btn" data-color="#E91E63" title="Hồng"></button>
@@ -547,10 +555,12 @@
                                     <button type="button" class="color-btn" data-color="#00BCD4" title="Cyan"></button>
                                 </div>
                                 <div class="custom-color-row">
-                                    <input type="color" id="customThemeColor" value="#4caf50" title="Chọn màu bất kỳ">
-                                    <input type="text" id="customThemeHex" value="#4CAF50" maxlength="7" placeholder="#RRGGBB">
-                                   <button type="button" class="btn btn-secondary btn-apply-color" id="applyCustomColorBtn">Áp Dụng</button>
+                                    <input type="color" id="customThemeColor" value="#00c98d" title="Chọn màu bất kỳ">
+                                    <input type="text" id="customThemeHex" value="#00C98D" maxlength="7" placeholder="#RRGGBB">
+                                   <button type="button" class="btn btn-primary btn-apply-color" id="applyCustomColorBtn">Áp Dụng</button>
                                 </div>
+                                <p class="theme-default-note">Mặc định: giao diện intro (nền tối xanh + chữ sáng).</p>
+                                <button type="button" class="link-btn btn-reset-default-color" id="resetDefaultColorBtn">↺ Đặt lại màu mặc định</button>
                             </div>
                         </div>
 

@@ -1,4 +1,50 @@
 ﻿// ============== PIN MANAGER ==============
+const APP_DEBUG = false;
+
+function debugWarn() {
+    if (!APP_DEBUG || typeof console === 'undefined' || typeof console.warn !== 'function') return;
+    console.warn.apply(console, arguments);
+}
+
+function safeGetItem(key) {
+    try {
+        return localStorage.getItem(key);
+    } catch (e) {
+        return null;
+    }
+}
+
+function safeSetItem(key, value) {
+    try {
+        localStorage.setItem(key, value);
+        return true;
+    } catch (e) {
+        return false;
+    }
+}
+
+function safeRemoveItem(key) {
+    try {
+        localStorage.removeItem(key);
+    } catch (e) {}
+}
+
+function safeGetJson(key, fallbackValue) {
+    const raw = safeGetItem(key);
+    if (raw === null || raw === '') return fallbackValue;
+
+    try {
+        return JSON.parse(raw);
+    } catch (e) {
+        safeRemoveItem(key);
+        return fallbackValue;
+    }
+}
+
+function safeSetJson(key, value) {
+    return safeSetItem(key, JSON.stringify(value));
+}
+
 class PinManager {
     constructor() {
         this.pins = [];
@@ -37,11 +83,11 @@ class PinManager {
             createdDate: this.createdDate.getTime(),
             userEmail: appState.currentUser ? appState.currentUser.email : null
         };
-        localStorage.setItem('userPins_' + (appState.currentUser ? appState.currentUser.email : ''), JSON.stringify(pinsData));
+        safeSetJson('userPins_' + (appState.currentUser ? appState.currentUser.email : ''), pinsData);
     }
 
     loadPins(email) {
-        const pinsData = JSON.parse(localStorage.getItem('userPins_' + email) || 'null');
+        const pinsData = safeGetJson('userPins_' + email, null);
         if (pinsData) {
             this.pins = pinsData.pins || [];
             this.usedPins = pinsData.usedPins || [];
@@ -120,6 +166,7 @@ class ChatHistoryManager {
         this.maxHistories = 80;
         this.histories = [];
         this.currentSessionId = null;
+        this.minOtherMessagesToPersist = 3;
     }
 
     generateSessionId() {
@@ -219,8 +266,47 @@ class ChatHistoryManager {
     saveHistories() {
         if (appState.currentUser) {
             const key = 'chatHistories_' + appState.currentUser.email;
-            localStorage.setItem(key, JSON.stringify(this.histories));
+            safeSetJson(key, this.histories);
         }
+    }
+
+    countOtherMessages(session) {
+        if (!session || !Array.isArray(session.messages)) return 0;
+        return session.messages.reduce(function(total, msg) {
+            if (msg && msg.isUser === false) return total + 1;
+            return total;
+        }, 0);
+    }
+
+    isSessionPersistable(session) {
+        return this.countOtherMessages(session) >= this.minOtherMessagesToPersist;
+    }
+
+    pruneUnpersistableSessions() {
+        const originalLength = this.histories.length;
+        this.histories = this.histories.filter(function(session) {
+            return this.isSessionPersistable(session);
+        }.bind(this));
+        return originalLength !== this.histories.length;
+    }
+
+    saveCurrentSessionOnExit() {
+        if (!appState.currentUser) return;
+
+        const currentSessionId = this.currentSessionId;
+        const currentSession = currentSessionId ? this.getSessionById(currentSessionId) : null;
+        if (!currentSession) {
+            this.saveHistories();
+            return;
+        }
+
+        if (!this.isSessionPersistable(currentSession)) {
+            this.histories = this.histories.filter(function(session) {
+                return session.id !== currentSession.id;
+            });
+        }
+
+        this.saveHistories();
     }
 
     loadHistories(email) {
@@ -231,15 +317,11 @@ class ChatHistoryManager {
         }
 
         const key = 'chatHistories_' + email;
-        const saved = localStorage.getItem(key);
-        if (saved) {
-            try {
-                this.histories = JSON.parse(saved);
-            } catch (e) {
-                this.histories = [];
-            }
-        } else {
-            this.histories = [];
+        const saved = safeGetJson(key, []);
+        this.histories = Array.isArray(saved) ? saved : [];
+        const hasPruned = this.pruneUnpersistableSessions();
+        if (hasPruned && appState.currentUser) {
+            this.saveHistories();
         }
 
         this.currentSessionId = this.histories.length > 0 ? this.histories[0].id : null;
@@ -253,6 +335,15 @@ class ChatHistoryManager {
 }
 
 const chatHistoryManager = new ChatHistoryManager();
+const DEMO_EMAIL = 'demo@healthchat.com';
+const INTRO_DEFAULT_THEME = 'light';
+const INTRO_DEFAULT_PRIMARY_COLOR = '#00C98D';
+const DEFAULT_AVATAR_DATA =
+    "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='150' height='150' viewBox='0 0 150 150'%3E%3Crect width='150' height='150' fill='%23bdbdbd'/%3E%3Ccircle cx='75' cy='48' r='30' fill='%23f2f2f2'/%3E%3Cpath d='M20 150a55 55 0 0 1 110 0Z' fill='%23f2f2f2'/%3E%3C/svg%3E";
+
+function isDemoEmail(email) {
+    return String(email || '').trim().toLowerCase() === DEMO_EMAIL;
+}
 
 // ============== STATE MANAGEMENT ==============
 class AppState {
@@ -381,35 +472,45 @@ class AppState {
     }
 
     initializeDemoUser() {
-        const users = JSON.parse(localStorage.getItem('users') || '[]');
-        if (!users.some(function(u) { return u.email === 'demo@healthchat.com'; })) {
+        const usersRaw = safeGetJson('users', []);
+        const users = Array.isArray(usersRaw) ? usersRaw : [];
+        if (!users.some(function(u) { return isDemoEmail(u.email); })) {
             users.push({
                 id: Date.now(),
                 name: 'Người Dùng Demo',
-                email: 'demo@healthchat.com',
+                email: DEMO_EMAIL,
                 password: '123456'
             });
-            localStorage.setItem('users', JSON.stringify(users));
+            safeSetJson('users', users);
+        }
+
+        const demoSettingsKey = 'userSettings_' + DEMO_EMAIL;
+        const demoSettings = safeGetJson(demoSettingsKey, null);
+        if (!demoSettings || typeof demoSettings !== 'object') {
+            safeSetJson(demoSettingsKey, {
+                theme: INTRO_DEFAULT_THEME,
+                primaryColor: INTRO_DEFAULT_PRIMARY_COLOR
+            });
         }
     }
 
     loadFromLocalStorage() {
-        const savedUser = localStorage.getItem('currentUser');
-        const savedHealth = localStorage.getItem('healthHistory');
-        const savedInitialHealth = localStorage.getItem('initialHealthData');
-        
-        if (savedUser) {
-            this.currentUser = JSON.parse(savedUser);
+        const savedUser = safeGetJson('currentUser', null);
+        const savedHealth = safeGetJson('healthHistory', []);
+        const savedInitialHealth = safeGetJson('initialHealthData', null);
+
+        if (savedUser && typeof savedUser === 'object') {
+            this.currentUser = savedUser;
             this.isAuthenticated = true;
             pinManager.loadPins(this.currentUser.email);
         }
-        
-        if (savedHealth) {
-            this.healthHistory = JSON.parse(savedHealth);
+
+        if (Array.isArray(savedHealth)) {
+            this.healthHistory = savedHealth;
         }
 
-        if (savedInitialHealth) {
-            this.initialHealthData = JSON.parse(savedInitialHealth);
+        if (savedInitialHealth && typeof savedInitialHealth === 'object') {
+            this.initialHealthData = savedInitialHealth;
         }
 
         this.loadDailyCheckIns();
@@ -418,10 +519,10 @@ class AppState {
 
     saveToLocalStorage() {
         if (this.currentUser) {
-            localStorage.setItem('currentUser', JSON.stringify(this.currentUser));
+            safeSetJson('currentUser', this.currentUser);
         }
-        localStorage.setItem('healthHistory', JSON.stringify(this.healthHistory));
-        localStorage.setItem('initialHealthData', JSON.stringify(this.initialHealthData));
+        safeSetJson('healthHistory', this.healthHistory);
+        safeSetJson('initialHealthData', this.initialHealthData);
         this.saveDailyCheckIns();
         this.saveGamificationState();
     }
@@ -454,46 +555,31 @@ class AppState {
     }
 
     loadDailyCheckIns() {
-        const saved = localStorage.getItem(this.getDailyCheckInKey());
-        if (!saved) {
-            this.dailyCheckIns = [];
-            return;
-        }
-
-        try {
-            this.dailyCheckIns = this.normalizeDailyCheckIns(JSON.parse(saved));
-        } catch (e) {
-            this.dailyCheckIns = [];
-        }
+        const saved = safeGetJson(this.getDailyCheckInKey(), []);
+        this.dailyCheckIns = this.normalizeDailyCheckIns(saved);
     }
 
     saveDailyCheckIns() {
-        localStorage.setItem(this.getDailyCheckInKey(), JSON.stringify(this.dailyCheckIns || []));
+        safeSetJson(this.getDailyCheckInKey(), this.dailyCheckIns || []);
     }
 
     loadGamificationState() {
-        const raw = localStorage.getItem(this.getGamificationKey());
+        const raw = safeGetJson(this.getGamificationKey(), null);
         if (!raw) {
             this.gamification = this.getDefaultGamificationState();
             return;
         }
 
-        try {
-            this.gamification = this.normalizeGamificationState(JSON.parse(raw));
-        } catch (e) {
-            this.gamification = this.getDefaultGamificationState();
-        }
+        this.gamification = this.normalizeGamificationState(raw);
     }
 
     saveGamificationState() {
         this.gamification = this.normalizeGamificationState(this.gamification);
-        localStorage.setItem(this.getGamificationKey(), JSON.stringify(this.gamification));
+        safeSetJson(this.getGamificationKey(), this.gamification);
     }
 }
 
 const appState = new AppState();
-const DEFAULT_AVATAR_DATA =
-    "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='150' height='150' viewBox='0 0 150 150'%3E%3Crect width='150' height='150' fill='%23bdbdbd'/%3E%3Ccircle cx='75' cy='48' r='30' fill='%23f2f2f2'/%3E%3Cpath d='M20 150a55 55 0 0 1 110 0Z' fill='%23f2f2f2'/%3E%3C/svg%3E";
 
 // ============== SETTINGS MANAGER ==============
 class SettingsManager {
@@ -501,42 +587,63 @@ class SettingsManager {
         this.loadSettings();
     }
 
+    buildSettingsKeyByEmail(email) {
+        const normalizedEmail = String(email || '').trim().toLowerCase();
+        return normalizedEmail ? 'userSettings_' + normalizedEmail : 'userSettings_guest';
+    }
+
     getSettingsKey() {
         const userEmail = appState.currentUser && appState.currentUser.email
-            ? appState.currentUser.email.trim().toLowerCase()
+            ? appState.currentUser.email
             : '';
-        return userEmail ? 'userSettings_' + userEmail : 'userSettings_guest';
+        return this.buildSettingsKeyByEmail(userEmail);
+    }
+
+    getDefaultSettings() {
+        return {
+            theme: INTRO_DEFAULT_THEME,
+            primaryColor: INTRO_DEFAULT_PRIMARY_COLOR
+        };
     }
 
     getLegacySettings() {
-        const legacy = localStorage.getItem('userSettings');
-        if (!legacy) return null;
+        return safeGetJson('userSettings', null);
+    }
 
-        try {
-            return JSON.parse(legacy);
-        } catch (e) {
-            return null;
+    normalizeTheme(theme) {
+        return theme === 'dark' ? 'dark' : 'light';
+    }
+
+    normalizePrimaryColor(color) {
+        if (!color) return null;
+        let value = String(color).trim();
+        if (!value.startsWith('#')) value = '#' + value;
+        if (/^#[0-9a-fA-F]{3}$/.test(value)) {
+            value = '#' + value[1] + value[1] + value[2] + value[2] + value[3] + value[3];
         }
+        return /^#[0-9a-fA-F]{6}$/.test(value) ? value.toUpperCase() : null;
     }
 
     loadSettings() {
         const settingsKey = this.getSettingsKey();
-        let settings = {};
-        const saved = localStorage.getItem(settingsKey);
+        const defaults = this.getDefaultSettings();
+        let settings = Object.assign({}, defaults);
+        const saved = safeGetJson(settingsKey, null);
+        const isDemoAccount = !!(appState.currentUser && isDemoEmail(appState.currentUser.email));
 
-        if (saved) {
-            try {
-                settings = JSON.parse(saved) || {};
-            } catch (e) {
-                settings = {};
-            }
-        } else {
-            const legacySettings = this.getLegacySettings();
-            if (legacySettings) {
-                settings = legacySettings;
-                localStorage.setItem(settingsKey, JSON.stringify(settings));
-            }
+        if (saved && typeof saved === 'object') {
+            settings = Object.assign({}, defaults, saved);
         }
+
+        settings.theme = this.normalizeTheme(settings.theme);
+        settings.primaryColor = this.normalizePrimaryColor(settings.primaryColor) || defaults.primaryColor;
+
+        if (isDemoAccount) {
+            settings.theme = defaults.theme;
+            settings.primaryColor = defaults.primaryColor;
+        }
+
+        safeSetJson(settingsKey, settings);
 
         if (settings.theme === 'dark') {
             document.body.classList.add('dark-mode');
@@ -544,11 +651,11 @@ class SettingsManager {
             document.body.classList.remove('dark-mode');
         }
 
-        if (settings.primaryColor) {
-            this.setThemeColor(settings.primaryColor);
-        }
+        this.setThemeColor(settings.primaryColor);
 
-        if (settings.avatar) {
+        if (isDemoAccount) {
+            this.updateAvatarDisplay(DEFAULT_AVATAR_DATA);
+        } else if (settings.avatar) {
             this.updateAvatarDisplay(settings.avatar);
         } else {
             this.updateAvatarDisplay(DEFAULT_AVATAR_DATA);
@@ -556,17 +663,22 @@ class SettingsManager {
     }
 
     saveSettings(settings) {
-        localStorage.setItem(this.getSettingsKey(), JSON.stringify(settings));
+        const defaults = this.getDefaultSettings();
+        const merged = Object.assign({}, defaults, settings || {});
+        merged.theme = this.normalizeTheme(merged.theme);
+        merged.primaryColor = this.normalizePrimaryColor(merged.primaryColor) || defaults.primaryColor;
+        safeSetJson(this.getSettingsKey(), merged);
     }
 
     getSettings() {
-        const saved = localStorage.getItem(this.getSettingsKey());
-        if (!saved) return {};
-        try {
-            return JSON.parse(saved) || {};
-        } catch (e) {
-            return {};
-        }
+        const defaults = this.getDefaultSettings();
+        const saved = safeGetJson(this.getSettingsKey(), null);
+        if (!saved || typeof saved !== 'object') return Object.assign({}, defaults);
+
+        const merged = Object.assign({}, defaults, saved);
+        merged.theme = this.normalizeTheme(merged.theme);
+        merged.primaryColor = this.normalizePrimaryColor(merged.primaryColor) || defaults.primaryColor;
+        return merged;
     }
 
     setThemeColor(color) {
@@ -712,9 +824,12 @@ class AIEngine {
 
     getCandidateChatEndpoints() {
         const endpoints = [this.chatApiEndpoint];
-        // Khi khong set endpoint thu cong, thu fallback localhost neu endpoint hien tai that bai.
-        if (!this.configuredEndpoint && this.chatApiEndpoint !== this.localChatApiEndpoint) {
+        // Luon co fallback local/remote de tranh truong hop endpoint cau hinh sai hoac backend tam thoi khong kha dung.
+        if (this.localChatApiEndpoint && this.chatApiEndpoint !== this.localChatApiEndpoint) {
             endpoints.push(this.localChatApiEndpoint);
+        }
+        if (this.remoteChatApiEndpoint && this.chatApiEndpoint !== this.remoteChatApiEndpoint) {
+            endpoints.push(this.remoteChatApiEndpoint);
         }
         return Array.from(new Set(endpoints.filter(Boolean)));
     }
@@ -774,10 +889,10 @@ class AIEngine {
                     }
 
                     const errorDetails = data && data.details ? data.details : data;
-                    console.warn('Chat backend error:', endpoint, response.status, errorDetails);
+                    debugWarn('Chat backend error:', endpoint, response.status, errorDetails);
                     break;
                 } catch (error) {
-                    console.warn('DeepSeek request failed:', endpoint, error, 'Backend co the chua chay. Hay chay chatbot-server o cong 3000.');
+                    debugWarn('DeepSeek request failed:', endpoint, error, 'Backend co the chua chay. Hay chay chatbot-server o cong 3000.');
                     break;
                 } finally {
                     clearTimeout(timeoutId);
@@ -932,7 +1047,7 @@ class AIEngine {
             '😊 Chào bạn! Rất vui được gặp bạn. Hôm nay tôi có thể giúp gì?',
             '👋 Hi! Tôi ở đây để hỗ trợ sức khỏe của bạn.',
             '🌟 Chào! Hôm nay bạn cảm thấy thế nào?',
-            '💚 Xin chào bạn! Mình là HealthChat. Bạn có vấn đề gì không?'
+            '💚 Xin chào bạn! Mình là Heath Student AI. Bạn có vấn đề gì không?'
         ];
         return this.getRandomElement(greetings);
     }
@@ -1539,17 +1654,138 @@ class HealthChatApp {
         this.timerInterval = null;
         this.chatMissionTick = 0;
         this.streakShopOpen = false;
-        const savedHistoryPanelState = localStorage.getItem('historyPanelCollapsed');
+        this.streakCalendarMonthOffset = 0;
+        const savedHistoryPanelState = safeGetItem('historyPanelCollapsed');
         this.historyPanelCollapsed = savedHistoryPanelState === null
             ? window.matchMedia('(max-width: 768px)').matches
             : savedHistoryPanelState === '1';
+        this.initializeLandingEffects();
         this.initializeEventListeners();
         this.startMissionTrackingTimer();
+
+        if (this.shouldOpenIntroForGuest()) {
+            this.openIntroPage();
+            return;
+        }
         
         if (appState.isAuthenticated) {
             this.ensureGamificationState();
+            this.setLandingVisible(false);
             this.goToPage('chat');
+        } else {
+            const authPageFromUrl = this.getAuthPageFromUrl();
+            const authPage = authPageFromUrl || 'login';
+            this.setLandingVisible(this.hasLandingScreen() && !authPageFromUrl);
+            this.switchAuthPage(authPage);
+            this.goToPage(authPage);
         }
+    }
+
+    hasLandingScreen() {
+        return !!document.getElementById('landingScreen');
+    }
+
+    getAuthPageFromUrl() {
+        try {
+            const params = new URLSearchParams(window.location.search || '');
+            const auth = String(params.get('auth') || '').trim().toLowerCase();
+            if (auth === 'signup') return 'signup';
+            if (auth === 'login') return 'login';
+        } catch (e) {
+            return null;
+        }
+        return null;
+    }
+
+    getNextPageFromUrl() {
+        try {
+            const params = new URLSearchParams(window.location.search || '');
+            const nextPage = String(params.get('next') || '').trim().toLowerCase();
+            if (nextPage === 'chat') return 'chat';
+        } catch (e) {
+            return null;
+        }
+        return null;
+    }
+
+    shouldOpenIntroForGuest() {
+        if (this.hasLandingScreen()) return false;
+        if (appState.isAuthenticated) return false;
+        const authPage = this.getAuthPageFromUrl();
+        const nextPage = this.getNextPageFromUrl();
+        return !authPage && !nextPage;
+    }
+
+    openIntroPage() {
+        window.location.href = 'intro.html';
+    }
+
+    initializeLandingEffects() {
+        const cur = document.getElementById('cur');
+        const curR = document.getElementById('curR');
+        const isTouch = 'ontouchstart' in window;
+        let mx = 0;
+        let my = 0;
+        let rx = 0;
+        let ry = 0;
+
+        if (cur && curR && !isTouch) {
+            document.addEventListener('mousemove', function(e) {
+                mx = e.clientX;
+                my = e.clientY;
+                cur.style.left = mx + 'px';
+                cur.style.top = my + 'px';
+            });
+
+            const animateCursor = function() {
+                rx += (mx - rx) * 0.12;
+                ry += (my - ry) * 0.12;
+                curR.style.left = rx + 'px';
+                curR.style.top = ry + 'px';
+                requestAnimationFrame(animateCursor);
+            };
+            animateCursor();
+        } else if (cur && curR) {
+            cur.style.display = 'none';
+            curR.style.display = 'none';
+        }
+
+        const nav = document.getElementById('nav');
+        if (nav) {
+            window.addEventListener('scroll', function() {
+                if (!document.body.classList.contains('landing-visible')) return;
+                nav.style.background = window.scrollY > 40
+                    ? 'rgba(7,16,13,0.95)'
+                    : 'rgba(7,16,13,0.7)';
+            });
+        }
+
+        if ('IntersectionObserver' in window) {
+            const obs = new IntersectionObserver(function(entries) {
+                entries.forEach(function(entry, index) {
+                    if (!entry.isIntersecting) return;
+                    setTimeout(function() {
+                        entry.target.classList.add('in');
+                    }, index * 90);
+                });
+            }, { threshold: 0.1 });
+
+            document.querySelectorAll('.landing-screen .rise').forEach(function(el) {
+                obs.observe(el);
+            });
+        } else {
+            document.querySelectorAll('.landing-screen .rise').forEach(function(el) {
+                el.classList.add('in');
+            });
+        }
+    }
+
+    isDemoAccount() {
+        return !!(appState.currentUser && isDemoEmail(appState.currentUser.email));
+    }
+
+    showDemoFeatureNotice() {
+        alert('⚠️ Tài khoản demo không dùng được tính năng này.\n\nBạn tạo tài khoản mới vô được tính năng này.');
     }
 
     initializeEventListeners() {
@@ -1560,6 +1796,38 @@ class HealthChatApp {
         if (loginForm) {
             loginForm.addEventListener('submit', function(e) { self.handleLogin(e); });
         }
+
+        const demoQuickLoginBox = document.getElementById('demoQuickLoginBox');
+        if (demoQuickLoginBox) {
+            demoQuickLoginBox.addEventListener('click', function() {
+                self.handleDemoLogin();
+            });
+            demoQuickLoginBox.addEventListener('keydown', function(e) {
+                if (e.key !== 'Enter' && e.key !== ' ') return;
+                e.preventDefault();
+                self.handleDemoLogin();
+            });
+        }
+
+        ['landingConsultBtnNav', 'landingConsultBtn', 'landingConsultBtnBottom'].forEach(function(id) {
+            const btn = document.getElementById(id);
+            if (btn) {
+                btn.addEventListener('click', function(e) {
+                    e.preventDefault();
+                    self.openAuthFromLanding('login');
+                });
+            }
+        });
+
+        const landingOpenSignupBtn = document.getElementById('landingOpenSignupBtn');
+        if (landingOpenSignupBtn) {
+            landingOpenSignupBtn.addEventListener('click', function(e) {
+                e.preventDefault();
+                self.openAuthFromLanding('signup');
+            });
+        }
+
+        // Topic cards tren landing chi de tham quan/noi dung, khong ep vao dang nhap.
 
         const signupForm = document.getElementById('signupForm');
         if (signupForm) {
@@ -1579,6 +1847,14 @@ class HealthChatApp {
             switchToLogin.addEventListener('click', function(e) {
                 e.preventDefault();
                 self.switchAuthPage('login');
+            });
+        }
+
+        const appBrandHome = document.getElementById('appBrandHome');
+        if (appBrandHome) {
+            appBrandHome.addEventListener('click', function(e) {
+                e.preventDefault();
+                self.openLandingShowcase();
             });
         }
 
@@ -1661,6 +1937,10 @@ class HealthChatApp {
         if (settingsBtn) {
             settingsBtn.addEventListener('click', function() {
                 document.getElementById('profileMenu').classList.remove('active');
+                if (self.isDemoAccount()) {
+                    self.showDemoFeatureNotice();
+                    return;
+                }
                 self.goToPage('settings');
                 setTimeout(function() { self.initializeSettingsPage(); }, 100);
             });
@@ -1670,6 +1950,10 @@ class HealthChatApp {
         if (securityBtn) {
             securityBtn.addEventListener('click', function() {
                 document.getElementById('profileMenu').classList.remove('active');
+                if (self.isDemoAccount()) {
+                    self.showDemoFeatureNotice();
+                    return;
+                }
                 self.goToPage('security');
                 setTimeout(function() { self.initializeSecurityPage(); }, 100);
             });
@@ -1784,6 +2068,20 @@ class HealthChatApp {
             });
         }
 
+        const streakPrevMonthBtn = document.getElementById('streakPrevMonthBtn');
+        if (streakPrevMonthBtn) {
+            streakPrevMonthBtn.addEventListener('click', function() {
+                self.shiftStreakCalendarMonth(-1);
+            });
+        }
+
+        const streakNextMonthBtn = document.getElementById('streakNextMonthBtn');
+        if (streakNextMonthBtn) {
+            streakNextMonthBtn.addEventListener('click', function() {
+                self.shiftStreakCalendarMonth(1);
+            });
+        }
+
         const toggleShopBtn = document.getElementById('toggleShopBtn');
         if (toggleShopBtn) {
             toggleShopBtn.addEventListener('click', function() {
@@ -1795,13 +2093,6 @@ class HealthChatApp {
         if (buyStreakShieldBtn) {
             buyStreakShieldBtn.addEventListener('click', function() {
                 self.buyShopItem('streakShield');
-            });
-        }
-
-        const buyMysteryRewardBtn = document.getElementById('buyMysteryRewardBtn');
-        if (buyMysteryRewardBtn) {
-            buyMysteryRewardBtn.addEventListener('click', function() {
-                self.buyShopItem('mysteryReward');
             });
         }
 
@@ -1920,6 +2211,7 @@ class HealthChatApp {
         const customThemeColor = document.getElementById('customThemeColor');
         const customThemeHex = document.getElementById('customThemeHex');
         const applyCustomColorBtn = document.getElementById('applyCustomColorBtn');
+        const resetDefaultColorBtn = document.getElementById('resetDefaultColorBtn');
 
         if (customThemeColor) {
             customThemeColor.addEventListener('input', function() {
@@ -1940,6 +2232,12 @@ class HealthChatApp {
         if (applyCustomColorBtn) {
             applyCustomColorBtn.addEventListener('click', function() {
                 if (customThemeHex) self.setThemeColor(customThemeHex.value);
+            });
+        }
+
+        if (resetDefaultColorBtn) {
+            resetDefaultColorBtn.addEventListener('click', function() {
+                self.resetThemeDefaults(true);
             });
         }
 
@@ -2280,7 +2578,7 @@ class HealthChatApp {
             return '<div class="daily-mission-item' + (done ? ' done' : '') + '">' +
                 '<div class="daily-mission-top">' +
                 '<span class="daily-mission-title">' + mission.title + '</span>' +
-                '<span class="daily-mission-reward">+' + mission.reward + ' 🔥</span>' +
+                '<span class="daily-mission-reward">+' + mission.reward + ' 🪙</span>' +
                 '</div>' +
                 '<div class="daily-mission-progress">' +
                 '<span>' + progress + '/' + target + '</span>' +
@@ -2346,12 +2644,6 @@ class HealthChatApp {
                 price: 10,
                 weeklyLimit: 1,
                 inventoryKey: 'streakShield'
-            },
-            mysteryReward: {
-                title: 'Phần thưởng bí ẩn',
-                price: 15,
-                weeklyLimit: 1,
-                inventoryKey: ''
             },
             honorBadge: {
                 title: 'Huy hiệu danh dự',
@@ -2436,12 +2728,11 @@ class HealthChatApp {
             if (soldOut) {
                 button.textContent = 'Hết lượt tuần này';
             } else {
-                button.textContent = item.price + ' 🔥';
+                button.textContent = item.price + ' 🪙';
             }
         };
 
         setButtonState('buyStreakShieldBtn', 'streakShield');
-        setButtonState('buyMysteryRewardBtn', 'mysteryReward');
         setButtonState('buyHonorBadgeBtn', 'honorBadge');
     }
 
@@ -2466,7 +2757,7 @@ class HealthChatApp {
 
         const currentCoins = Math.max(0, parseInt(appState.gamification.coins, 10) || 0);
         if (currentCoins < item.price) {
-            alert('🔥 Bạn chưa đủ xu để mua món này.');
+            alert('🪙 Bạn chưa đủ xu để mua món này.');
             this.renderShopState();
             return;
         }
@@ -2474,10 +2765,15 @@ class HealthChatApp {
         appState.gamification.coins = currentCoins - item.price;
         purchases[itemKey] = bought + 1;
         appState.gamification.shopWeeklySales.purchases = purchases;
+        let unlockedHonorBadgeAchievement = false;
 
         if (item.inventoryKey) {
             const inventory = appState.gamification.shopInventory || {};
-            inventory[item.inventoryKey] = Math.max(0, parseInt(inventory[item.inventoryKey], 10) || 0) + 1;
+            const currentOwned = Math.max(0, parseInt(inventory[item.inventoryKey], 10) || 0);
+            inventory[item.inventoryKey] = currentOwned + 1;
+            if (itemKey === 'honorBadge' && currentOwned === 0) {
+                unlockedHonorBadgeAchievement = true;
+            }
             appState.gamification.shopInventory = inventory;
         }
 
@@ -2485,15 +2781,8 @@ class HealthChatApp {
         this.renderShopState();
         this.renderDailyMissions();
 
-        if (itemKey === 'mysteryReward') {
-            const rewards = [
-                'Bạn đang đi đúng hướng, hãy giữ nhịp đều đặn mỗi ngày.',
-                'Mỗi lần chăm sóc sức khỏe là một bước tiến lớn.',
-                'Không cần hoàn hảo, chỉ cần đều đặn và kiên trì.',
-                'Cơ thể khỏe hơn khi bạn quan tâm nó từng ngày.'
-            ];
-            const randomMessage = rewards[Math.floor(Math.random() * rewards.length)];
-            alert('🎁 ' + randomMessage);
+        if (itemKey === 'honorBadge' && unlockedHonorBadgeAchievement) {
+            alert('🏅 Đã mua thành công: ' + item.title + '. Thành tựu "Nhà sưu tầm" đã mở khóa.');
         } else {
             alert('✅ Đã mua thành công: ' + item.title + '.');
         }
@@ -2571,7 +2860,8 @@ class HealthChatApp {
             return;
         }
 
-        const users = JSON.parse(localStorage.getItem('users') || '[]');
+        const usersRaw = safeGetJson('users', []);
+        const users = Array.isArray(usersRaw) ? usersRaw : [];
         let found = false;
 
         for (let i = 0; i < users.length; i++) {
@@ -2613,30 +2903,26 @@ class HealthChatApp {
             return;
         }
 
-        const users = JSON.parse(localStorage.getItem('users') || '[]');
+        const usersRaw = safeGetJson('users', []);
+        const users = Array.isArray(usersRaw) ? usersRaw : [];
         const userIdx = users.findIndex(function(u) { return u.email === this.resetPasswordEmail; }.bind(this));
 
         if (userIdx !== -1) {
             users[userIdx].password = newPassword;
-            localStorage.setItem('users', JSON.stringify(users));
+            safeSetJson('users', users);
             alert('✅ Mật khẩu đã cập nhật! Hãy đăng nhập lại.');
             this.closeForgotPasswordModal();
             this.switchAuthPage('login');
         }
     }
 
-    handleLogin(e) {
-        e.preventDefault();
-        const email = document.getElementById('loginEmail').value.trim();
-        const password = document.getElementById('loginPassword').value;
-
-        if (!email || !password) {
-            alert('❌ Vui lòng điền email và mật khẩu!');
-            return;
-        }
-
-        const users = JSON.parse(localStorage.getItem('users') || '[]');
-        const user = users.find(function(u) { return u.email === email && u.password === password; });
+    loginWithCredentials(email, password, showError) {
+        const usersRaw = safeGetJson('users', []);
+        const users = Array.isArray(usersRaw) ? usersRaw : [];
+        const normalizedEmail = (email || '').trim().toLowerCase();
+        const user = users.find(function(u) {
+            return String(u.email || '').trim().toLowerCase() === normalizedEmail && u.password === password;
+        });
 
         if (user) {
             appState.currentUser = user;
@@ -2655,11 +2941,40 @@ class HealthChatApp {
             if (userEmailEl) userEmailEl.textContent = user.email;
             this.streakShopOpen = false;
             this.toggleStreakShop(false);
-            
-            this.showInitialChat();
+            this.setLandingVisible(false);
+            this.startNewChat();
+            return true;
         } else {
-            alert('❌ Email hoặc mật khẩu không chính xác!');
+            if (showError !== false) {
+                alert('❌ Email hoặc mật khẩu không chính xác!');
+            }
+            return false;
         }
+    }
+
+    handleDemoLogin() {
+        const demoEmail = DEMO_EMAIL;
+        const demoPassword = '123456';
+        const emailInput = document.getElementById('loginEmail');
+        const passwordInput = document.getElementById('loginPassword');
+
+        if (emailInput) emailInput.value = demoEmail;
+        if (passwordInput) passwordInput.value = demoPassword;
+
+        this.loginWithCredentials(demoEmail, demoPassword, false);
+    }
+
+    handleLogin(e) {
+        e.preventDefault();
+        const email = document.getElementById('loginEmail').value.trim();
+        const password = document.getElementById('loginPassword').value;
+
+        if (!email || !password) {
+            alert('❌ Vui lòng điền email và mật khẩu!');
+            return;
+        }
+
+        this.loginWithCredentials(email, password, true);
     }
 
     handleSignup(e) {
@@ -2684,7 +2999,8 @@ class HealthChatApp {
             return;
         }
 
-        const users = JSON.parse(localStorage.getItem('users') || '[]');
+        const usersRaw = safeGetJson('users', []);
+        const users = Array.isArray(usersRaw) ? usersRaw : [];
         if (users.some(function(u) { return u.email === email; })) {
             alert('❌ Email đã được dùng!');
             return;
@@ -2692,7 +3008,13 @@ class HealthChatApp {
 
         const newUser = { id: Date.now(), name: name, email: email, password: password };
         users.push(newUser);
-        localStorage.setItem('users', JSON.stringify(users));
+        safeSetJson('users', users);
+
+        const newUserSettingsKey = settingsManager.buildSettingsKeyByEmail(email);
+        const existingNewUserSettings = safeGetJson(newUserSettingsKey, null);
+        if (!existingNewUserSettings || typeof existingNewUserSettings !== 'object') {
+            safeSetJson(newUserSettingsKey, settingsManager.getDefaultSettings());
+        }
 
         document.getElementById('signupName').value = '';
         document.getElementById('signupEmail').value = '';
@@ -2717,12 +3039,30 @@ class HealthChatApp {
         appState.gamification = appState.getDefaultGamificationState();
         this.streakShopOpen = false;
         this.toggleStreakShop(false);
-        localStorage.removeItem('currentUser');
+        safeRemoveItem('currentUser');
         settingsManager.loadSettings();
         chatHistoryManager.loadHistories(null);
         this.updateHistoryList();
         this.setAuthUIState(false);
-        this.goToPage('login');
+
+        if (this.shouldOpenIntroForGuest()) {
+            this.openIntroPage();
+            return;
+        }
+
+        const authPageFromUrl = this.getAuthPageFromUrl();
+        const shouldShowLanding = this.hasLandingScreen() && !authPageFromUrl;
+
+        if (shouldShowLanding) {
+            this.goToPage('login');
+            this.setLandingVisible(true);
+            return;
+        }
+
+        const authPage = authPageFromUrl || 'login';
+        this.switchAuthPage(authPage);
+        this.goToPage(authPage);
+        this.setLandingVisible(false);
     }
 
     showInitialChat() {
@@ -2741,6 +3081,48 @@ class HealthChatApp {
             if (signupPage) signupPage.classList.remove('active');
             if (loginPage) loginPage.classList.add('active');
         }
+    }
+
+    setLandingVisible(visible) {
+        const isVisible = this.hasLandingScreen() && !!visible;
+        document.body.classList.toggle('landing-visible', isVisible);
+        const landingScreen = document.getElementById('landingScreen');
+        if (landingScreen) {
+            landingScreen.setAttribute('aria-hidden', isVisible ? 'false' : 'true');
+        }
+        const cur = document.getElementById('cur');
+        const curR = document.getElementById('curR');
+        if (cur && curR) {
+            const isTouch = 'ontouchstart' in window;
+            const shouldShow = !isTouch;
+            cur.style.display = shouldShow ? 'block' : 'none';
+            curR.style.display = shouldShow ? 'block' : 'none';
+        }
+    }
+
+    openLandingShowcase() {
+        if (!this.hasLandingScreen()) {
+            this.openIntroPage();
+            return;
+        }
+        const profileMenu = document.getElementById('profileMenu');
+        if (profileMenu) profileMenu.classList.remove('active');
+        this.toggleSidebar(false);
+        this.setHistoryPanelVisible(false);
+        this.setLandingVisible(true);
+    }
+
+    openAuthFromLanding(targetPage) {
+        if (appState.isAuthenticated) {
+            this.setLandingVisible(false);
+            this.goToPage('chat');
+            return;
+        }
+
+        const page = targetPage === 'signup' ? 'signup' : 'login';
+        this.setLandingVisible(false);
+        this.switchAuthPage(page);
+        this.goToPage(page);
     }
 
     setHistoryPanelVisible(visible) {
@@ -2763,7 +3145,7 @@ class HealthChatApp {
 
     setHistoryPanelCollapsed(collapsed) {
         this.historyPanelCollapsed = !!collapsed;
-        localStorage.setItem('historyPanelCollapsed', this.historyPanelCollapsed ? '1' : '0');
+        safeSetItem('historyPanelCollapsed', this.historyPanelCollapsed ? '1' : '0');
         if (document.body.classList.contains('history-panel-visible')) {
             document.body.classList.toggle('history-panel-collapsed', this.historyPanelCollapsed);
         }
@@ -2771,6 +3153,11 @@ class HealthChatApp {
 
     // ============== PAGE NAVIGATION ==============
     goToPage(pageName) {
+        if ((pageName === 'settings' || pageName === 'security') && this.isDemoAccount()) {
+            this.showDemoFeatureNotice();
+            pageName = 'chat';
+        }
+
         appState.currentPage = pageName;
         document.querySelectorAll('.page').forEach(function(page) { page.classList.remove('active'); });
         
@@ -2809,6 +3196,7 @@ class HealthChatApp {
         } else if (pageName === 'health') {
             this.updateHealthDisplay();
         } else if (pageName === 'streak') {
+            this.streakCalendarMonthOffset = 0;
             this.updateStreakDisplay();
         } else if (pageName === 'stats') {
             this.initializeStatsPage();
@@ -2843,13 +3231,48 @@ class HealthChatApp {
     }
 
     // ============== CHAT METHODS ==============
-    getChatSuggestionList() {
+    getChatSuggestionPool() {
         return [
             'Để tầm soát biến chứng tiểu đường cần làm gì?',
             'Tạo thực đơn giảm cân trong 30 ngày giúp mình.',
             'Các sản phẩm chăm sóc da phù hợp tuổi trung niên là gì?',
-            'Những thực phẩm chức năng nào trẻ em nên bổ sung?'
+            'Những thực phẩm chức năng nào trẻ em nên bổ sung?',
+            'Cho mình thực đơn tăng cơ trong 2 tuần với ngân sách tiết kiệm.',
+            'Mình hay mất ngủ, bạn gợi ý lịch sinh hoạt 7 ngày để ngủ sâu hơn nhé.',
+            'Đau vai gáy khi ngồi máy tính lâu thì nên tập bài gì mỗi ngày?',
+            'Gợi ý bữa sáng nhanh dưới 15 phút mà vẫn đủ chất.',
+            'Làm sao giảm stress khi ôn thi liên tục mà không bị kiệt sức?',
+            'Mình bị đau dạ dày nhẹ, nên tránh những món nào?',
+            'Lịch đi bộ cho người mới bắt đầu trong 14 ngày như thế nào?',
+            'Nên uống bao nhiêu nước mỗi ngày theo cân nặng và mức vận động?',
+            'Gợi ý thực đơn ăn tối ít calo nhưng no lâu cho dân văn phòng.',
+            'Cách tăng đề kháng tự nhiên trong mùa lạnh là gì?',
+            'Mình hay đau đầu cuối ngày, có thói quen nào nên đổi ngay?',
+            'Lập kế hoạch chăm sóc da cơ bản sáng/tối cho da dầu mụn.',
+            'Có thể tập gì tại nhà 20 phút mỗi ngày để giảm mỡ bụng?',
+            'Mình thường bỏ bữa trưa, điều này ảnh hưởng gì và sửa sao?',
+            'Thực phẩm nào giúp cải thiện trí nhớ và tập trung khi học?',
+            'Gợi ý lịch nghỉ ngơi hợp lý để tránh burnout khi làm việc nhiều.',
+            'Có nên uống cà phê khi đang thiếu ngủ không? Cách dùng an toàn?',
+            'Mình muốn tăng cân lành mạnh, nên bắt đầu từ đâu?',
+            'Gợi ý menu 1 tuần cho người tiền đái tháo đường.',
+            'Các dấu hiệu cảnh báo nên đi khám sớm thay vì tự theo dõi tại nhà?'
         ];
+    }
+
+    getRandomSuggestionList(limit) {
+        const pool = this.getChatSuggestionPool().slice();
+        for (let i = pool.length - 1; i > 0; i--) {
+            const j = Math.floor(Math.random() * (i + 1));
+            const temp = pool[i];
+            pool[i] = pool[j];
+            pool[j] = temp;
+        }
+        return pool.slice(0, Math.max(1, limit || 6));
+    }
+
+    getChatSuggestionList() {
+        return this.getRandomSuggestionList(4);
     }
 
     getDefaultChatMarkup() {
@@ -2924,7 +3347,7 @@ class HealthChatApp {
                     chatMessages.appendChild(aiBubble);
                     chatMessages.scrollTop = chatMessages.scrollHeight;
                 } catch (err) {
-                    console.warn('sendMainMessage failed:', err);
+                    debugWarn('sendMainMessage failed:', err);
                     const fallbackResponse = aiEngine.generateResponse(message);
                     chatHistoryManager.addMessage(fallbackResponse, false);
                     app.updateHistoryList();
@@ -3452,19 +3875,38 @@ class HealthChatApp {
         return missed;
     }
 
+    shiftStreakCalendarMonth(delta) {
+        const step = parseInt(delta, 10);
+        if (!step) return;
+        const currentOffset = parseInt(this.streakCalendarMonthOffset, 10) || 0;
+        this.streakCalendarMonthOffset = Math.min(0, currentOffset + step);
+        this.updateStreakDisplay();
+    }
+
+    updateStreakCalendarNav() {
+        const nextBtn = document.getElementById('streakNextMonthBtn');
+        if (!nextBtn) return;
+        const currentOffset = parseInt(this.streakCalendarMonthOffset, 10) || 0;
+        nextBtn.disabled = currentOffset >= 0;
+    }
+
     renderStreakCalendar(dateSet, today, shieldDateSet) {
         const grid = document.getElementById('streakCalendarGrid');
         const monthLabel = document.getElementById('streakMonthLabel');
         if (!grid || !monthLabel) return;
 
-        const year = today.getFullYear();
-        const month = today.getMonth();
+        const monthOffset = Math.min(0, parseInt(this.streakCalendarMonthOffset, 10) || 0);
+        this.streakCalendarMonthOffset = monthOffset;
+        const viewDate = new Date(today.getFullYear(), today.getMonth() + monthOffset, 1);
+        const year = viewDate.getFullYear();
+        const month = viewDate.getMonth();
         const firstDay = new Date(year, month, 1);
         const daysInMonth = new Date(year, month + 1, 0).getDate();
         // Chuyen sang lich bat dau tu thu Hai.
         const leading = (firstDay.getDay() + 6) % 7;
 
         monthLabel.textContent = 'T' + (month + 1) + ' ' + year;
+        this.updateStreakCalendarNav();
 
         const weekdays = ['T2', 'T3', 'T4', 'T5', 'T6', 'T7', 'CN'];
         const cells = [];
@@ -3505,7 +3947,18 @@ class HealthChatApp {
     }
 
     updateStreakAchievements(longestStreak) {
+        const inventory = appState.gamification && appState.gamification.shopInventory
+            ? appState.gamification.shopInventory
+            : {};
+        const honorBadgeOwned = Math.max(0, parseInt(inventory.honorBadge, 10) || 0);
+
         document.querySelectorAll('#streakAchievementGrid .streak-achievement-card').forEach(function(card) {
+            const achievementKey = card.getAttribute('data-achievement');
+            if (achievementKey === 'honor_badge') {
+                card.classList.toggle('unlocked', honorBadgeOwned > 0);
+                return;
+            }
+
             const threshold = parseInt(card.getAttribute('data-threshold'), 10) || 0;
             card.classList.toggle('unlocked', longestStreak >= threshold);
         });
@@ -3720,6 +4173,11 @@ class HealthChatApp {
 
     // ============== AVATAR METHODS ==============
     handleAvatarUpload(e) {
+        if (this.isDemoAccount()) {
+            this.showDemoFeatureNotice();
+            return;
+        }
+
         const file = e.target.files[0];
         if (file) {
             const reader = new FileReader();
@@ -3734,6 +4192,11 @@ class HealthChatApp {
     }
 
     confirmAvatarCrop() {
+        if (this.isDemoAccount()) {
+            this.showDemoFeatureNotice();
+            return;
+        }
+
         const self = this;
         this.avatarCropManager.cropImage().then(function(croppedImageData) {
             settingsManager.updateAvatarDisplay(croppedImageData);
@@ -3747,6 +4210,12 @@ class HealthChatApp {
 
     // ============== SETTINGS PAGE ==============
     initializeSettingsPage() {
+        if (this.isDemoAccount()) {
+            this.showDemoFeatureNotice();
+            this.goToPage('chat');
+            return;
+        }
+
         const nameInput = document.getElementById('settingsName');
         const emailInput = document.getElementById('settingsEmail');
 
@@ -3764,7 +4233,7 @@ class HealthChatApp {
             document.getElementById('themeLight').checked = true;
         }
 
-        const currentColor = settings.primaryColor || '#4CAF50';
+        const currentColor = settings.primaryColor || settingsManager.getDefaultSettings().primaryColor;
         const colorInput = document.getElementById('customThemeColor');
         const hexInput = document.getElementById('customThemeHex');
         if (colorInput) colorInput.value = currentColor;
@@ -3773,6 +4242,11 @@ class HealthChatApp {
     }
 
     updateProfile() {
+        if (this.isDemoAccount()) {
+            this.showDemoFeatureNotice();
+            return;
+        }
+
         const name = document.getElementById('settingsName').value.trim();
         const email = document.getElementById('settingsEmail').value.trim();
 
@@ -3794,6 +4268,11 @@ class HealthChatApp {
     }
 
     updatePassword() {
+        if (this.isDemoAccount()) {
+            this.showDemoFeatureNotice();
+            return;
+        }
+
         const currentPwd = document.getElementById('currentPassword').value;
         const newPwd = document.getElementById('newPassword').value;
         const confirmPwd = document.getElementById('confirmPassword').value;
@@ -3818,13 +4297,14 @@ class HealthChatApp {
             return;
         }
 
-        const users = JSON.parse(localStorage.getItem('users') || '[]');
+        const usersRaw = safeGetJson('users', []);
+        const users = Array.isArray(usersRaw) ? usersRaw : [];
         const userIdx = users.findIndex(function(u) { return u.email === appState.currentUser.email; });
 
         if (userIdx !== -1) {
             users[userIdx].password = newPwd;
             appState.currentUser.password = newPwd;
-            localStorage.setItem('users', JSON.stringify(users));
+            safeSetJson('users', users);
             appState.saveToLocalStorage();
 
             document.getElementById('currentPassword').value = '';
@@ -3837,6 +4317,12 @@ class HealthChatApp {
 
     // ============== SECURITY PAGE ==============
     initializeSecurityPage() {
+        if (this.isDemoAccount()) {
+            this.showDemoFeatureNotice();
+            this.goToPage('chat');
+            return;
+        }
+
         this.updatePinStatus();
     }
 
@@ -3850,6 +4336,36 @@ class HealthChatApp {
             document.body.classList.add('dark-mode');
         } else {
             document.body.classList.remove('dark-mode');
+        }
+    }
+
+    resetThemeDefaults(showNotice) {
+        const defaults = settingsManager.getDefaultSettings();
+        const settings = settingsManager.getSettings();
+        settings.theme = defaults.theme;
+        settings.primaryColor = defaults.primaryColor;
+        settingsManager.saveSettings(settings);
+
+        if (defaults.theme === 'dark') {
+            document.body.classList.add('dark-mode');
+        } else {
+            document.body.classList.remove('dark-mode');
+        }
+
+        settingsManager.setThemeColor(defaults.primaryColor);
+        this.syncPresetColorButtons(defaults.primaryColor);
+
+        const colorInput = document.getElementById('customThemeColor');
+        const hexInput = document.getElementById('customThemeHex');
+        const themeLight = document.getElementById('themeLight');
+        const themeDark = document.getElementById('themeDark');
+        if (colorInput) colorInput.value = defaults.primaryColor;
+        if (hexInput) hexInput.value = defaults.primaryColor;
+        if (themeLight) themeLight.checked = defaults.theme !== 'dark';
+        if (themeDark) themeDark.checked = defaults.theme === 'dark';
+
+        if (showNotice) {
+            alert('✅ Đã đặt lại màu mặc định theo trang giới thiệu.');
         }
     }
 
@@ -3876,6 +4392,7 @@ class HealthChatApp {
 
     syncPresetColorButtons(selectedColor) {
         const selected = selectedColor ? this.normalizeHexColor(selectedColor) : null;
+        let hasPresetMatch = false;
         document.querySelectorAll('.color-btn').forEach(function(btn) {
             const raw = btn.getAttribute('data-color') || '';
             if (raw) btn.style.backgroundColor = raw;
@@ -3886,8 +4403,16 @@ class HealthChatApp {
             }
 
             const normalizedBtnColor = raw ? (raw.startsWith('#') ? raw.toUpperCase() : ('#' + raw).toUpperCase()) : null;
-            btn.classList.toggle('active', normalizedBtnColor === selected);
+            const isActive = normalizedBtnColor === selected;
+            btn.classList.toggle('active', isActive);
+            if (isActive) hasPresetMatch = true;
         });
+
+        const colorInput = document.getElementById('customThemeColor');
+        const hexInput = document.getElementById('customThemeHex');
+        const customActive = !!selected && !hasPresetMatch;
+        if (colorInput) colorInput.classList.toggle('active', customActive);
+        if (hexInput) hexInput.classList.toggle('active', customActive);
     }
 
     normalizeHexColor(color) {
@@ -4023,13 +4548,29 @@ class HealthChatApp {
     }
 
     // ============== CHAT HISTORY ==============
+    renderDefaultChatMarkup() {
+        const chatMessages = document.getElementById('chatMessages');
+        if (!chatMessages) return;
+        chatMessages.innerHTML = this.getDefaultChatMarkup();
+        chatMessages.scrollTop = chatMessages.scrollHeight;
+    }
+
+    openLatestChatOrDefault() {
+        const histories = chatHistoryManager.getAllHistories();
+        if (histories.length > 0) {
+            this.loadChat(histories[0].id);
+            return;
+        }
+
+        this.goToPage('chat');
+        this.renderDefaultChatMarkup();
+        this.updateHistoryList();
+    }
+
     startNewChat() {
         chatHistoryManager.startNewSession();
         this.goToPage('chat');
-        const chatMessages = document.getElementById('chatMessages');
-        if (chatMessages) {
-            chatMessages.innerHTML = this.getDefaultChatMarkup();
-        }
+        this.renderDefaultChatMarkup();
         this.updateHistoryList();
     }
 
@@ -4138,10 +4679,30 @@ window.addEventListener('load', function() {
         if (userEmailEl) userEmailEl.textContent = appState.currentUser.email;
         chatHistoryManager.loadHistories(appState.currentUser.email);
         app.updateHistoryList();
-        app.goToPage('chat');
+        app.setLandingVisible(false);
+        app.startNewChat();
     } else {
         app.setHistoryPanelVisible(false);
         app.setAuthUIState(false);
+
+        if (app.shouldOpenIntroForGuest()) {
+            app.openIntroPage();
+            return;
+        }
+
+        const authPageFromUrl = app.getAuthPageFromUrl();
+        const shouldShowLanding = app.hasLandingScreen() && !authPageFromUrl;
+
+        if (shouldShowLanding) {
+            app.goToPage('login');
+            app.setLandingVisible(true);
+            return;
+        }
+
+        const authPage = authPageFromUrl || 'login';
+        app.switchAuthPage(authPage);
+        app.goToPage(authPage);
+        app.setLandingVisible(false);
     }
 });
 
@@ -4149,6 +4710,7 @@ window.addEventListener('beforeunload', function() {
     if (app.timerInterval) {
         clearInterval(app.timerInterval);
     }
+    chatHistoryManager.saveCurrentSessionOnExit();
 });
 
 
