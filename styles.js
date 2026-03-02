@@ -338,6 +338,9 @@ const chatHistoryManager = new ChatHistoryManager();
 const DEMO_EMAIL = 'demo@healthchat.com';
 const INTRO_DEFAULT_THEME = 'light';
 const INTRO_DEFAULT_PRIMARY_COLOR = '#00C98D';
+const SESSION_INACTIVITY_TIMEOUT_MS = 60 * 60 * 1000;
+const SESSION_CHECK_INTERVAL_MS = 30 * 1000;
+const SESSION_LAST_ACTIVITY_KEY = 'sessionLastActivityAt';
 const DEFAULT_AVATAR_DATA =
     "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='150' height='150' viewBox='0 0 150 150'%3E%3Crect width='150' height='150' fill='%23bdbdbd'/%3E%3Ccircle cx='75' cy='48' r='30' fill='%23f2f2f2'/%3E%3Cpath d='M20 150a55 55 0 0 1 110 0Z' fill='%23f2f2f2'/%3E%3C/svg%3E";
 
@@ -494,15 +497,47 @@ class AppState {
         }
     }
 
+    getSessionLastActivityAt() {
+        const raw = safeGetItem(SESSION_LAST_ACTIVITY_KEY);
+        const timestamp = parseInt(raw, 10);
+        return Number.isFinite(timestamp) && timestamp > 0 ? timestamp : null;
+    }
+
+    setSessionLastActivityAt(timestamp) {
+        const value = Number.isFinite(timestamp) ? Math.floor(timestamp) : Date.now();
+        safeSetItem(SESSION_LAST_ACTIVITY_KEY, String(value));
+    }
+
+    touchSessionActivity() {
+        this.setSessionLastActivityAt(Date.now());
+    }
+
+    clearSessionActivity() {
+        safeRemoveItem(SESSION_LAST_ACTIVITY_KEY);
+    }
+
+    isSessionExpired(nowTimestamp) {
+        const lastActivity = this.getSessionLastActivityAt();
+        if (!lastActivity) return false;
+        const now = Number.isFinite(nowTimestamp) ? nowTimestamp : Date.now();
+        return now - lastActivity >= SESSION_INACTIVITY_TIMEOUT_MS;
+    }
+
     loadFromLocalStorage() {
         const savedUser = safeGetJson('currentUser', null);
         const savedHealth = safeGetJson('healthHistory', []);
         const savedInitialHealth = safeGetJson('initialHealthData', null);
 
         if (savedUser && typeof savedUser === 'object') {
-            this.currentUser = savedUser;
-            this.isAuthenticated = true;
-            pinManager.loadPins(this.currentUser.email);
+            if (this.isSessionExpired()) {
+                safeRemoveItem('currentUser');
+                this.clearSessionActivity();
+            } else {
+                this.currentUser = savedUser;
+                this.isAuthenticated = true;
+                this.touchSessionActivity();
+                pinManager.loadPins(this.currentUser.email);
+            }
         }
 
         if (Array.isArray(savedHealth)) {
@@ -1652,6 +1687,8 @@ class HealthChatApp {
         this.currentFilterDays = 1;
         this.resetPasswordEmail = null;
         this.timerInterval = null;
+        this.sessionCheckInterval = null;
+        this.lastSessionTouchAt = 0;
         this.chatMissionTick = 0;
         this.streakShopOpen = false;
         this.streakCalendarMonthOffset = 0;
@@ -1661,6 +1698,7 @@ class HealthChatApp {
             : savedHistoryPanelState === '1';
         this.initializeLandingEffects();
         this.initializeEventListeners();
+        this.initializeSessionTimeoutTracking();
         this.startMissionTrackingTimer();
 
         if (this.shouldOpenIntroForGuest()) {
@@ -1718,6 +1756,52 @@ class HealthChatApp {
 
     openIntroPage() {
         window.location.href = 'intro.html';
+    }
+
+    initializeSessionTimeoutTracking() {
+        const self = this;
+        const activityEvents = ['mousedown', 'keydown', 'touchstart', 'scroll'];
+
+        activityEvents.forEach(function(eventName) {
+            document.addEventListener(eventName, function() {
+                self.recordSessionActivity(false);
+            });
+        });
+
+        document.addEventListener('visibilitychange', function() {
+            if (document.visibilityState !== 'visible') return;
+            self.enforceSessionTimeout();
+            self.recordSessionActivity(true);
+        });
+
+        if (this.sessionCheckInterval) {
+            clearInterval(this.sessionCheckInterval);
+        }
+
+        this.sessionCheckInterval = setInterval(function() {
+            self.enforceSessionTimeout();
+        }, SESSION_CHECK_INTERVAL_MS);
+
+        this.enforceSessionTimeout();
+        this.recordSessionActivity(true);
+    }
+
+    recordSessionActivity(force) {
+        if (!appState.isAuthenticated) return;
+
+        const now = Date.now();
+        if (!force && now - this.lastSessionTouchAt < 10000) {
+            return;
+        }
+
+        this.lastSessionTouchAt = now;
+        appState.setSessionLastActivityAt(now);
+    }
+
+    enforceSessionTimeout() {
+        if (!appState.isAuthenticated) return;
+        if (!appState.isSessionExpired()) return;
+        this.handleLogout({ reason: 'timeout' });
     }
 
     initializeLandingEffects() {
@@ -2929,6 +3013,7 @@ class HealthChatApp {
             appState.isAuthenticated = true;
             appState.loadDailyCheckIns();
             appState.loadGamificationState();
+            appState.touchSessionActivity();
             appState.saveToLocalStorage();
             settingsManager.loadSettings();
             pinManager.loadPins(user.email);
@@ -3032,7 +3117,8 @@ class HealthChatApp {
         }
     }
 
-    handleLogout() {
+    handleLogout(options) {
+        const reason = options && typeof options === 'object' ? options.reason : null;
         appState.isAuthenticated = false;
         appState.currentUser = null;
         appState.dailyCheckIns = [];
@@ -3040,10 +3126,15 @@ class HealthChatApp {
         this.streakShopOpen = false;
         this.toggleStreakShop(false);
         safeRemoveItem('currentUser');
+        appState.clearSessionActivity();
         settingsManager.loadSettings();
         chatHistoryManager.loadHistories(null);
         this.updateHistoryList();
         this.setAuthUIState(false);
+
+        if (reason === 'timeout') {
+            alert('🔒 Phiên đăng nhập đã hết hạn do không hoạt động trong 1 giờ. Vui lòng đăng nhập lại.');
+        }
 
         if (this.shouldOpenIntroForGuest()) {
             this.openIntroPage();
@@ -4709,6 +4800,9 @@ window.addEventListener('load', function() {
 window.addEventListener('beforeunload', function() {
     if (app.timerInterval) {
         clearInterval(app.timerInterval);
+    }
+    if (app.sessionCheckInterval) {
+        clearInterval(app.sessionCheckInterval);
     }
     chatHistoryManager.saveCurrentSessionOnExit();
 });
